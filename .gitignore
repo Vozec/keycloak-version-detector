@@ -1,0 +1,16 @@
+# compiled binary (root only — must NOT match the cmd/kcvf/ source dir)
+/kcvf
+
+# logs / scratch
+*.log
+
+# local recon / scan outputs (never commit target lists)
+/keycloaks_version.txt
+*.targets
+*.scan
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
