@@ -194,7 +194,7 @@ to skip the old back-catalogue), `-grid` force the offline version grid,
 ## SDK
 
 ```go
-import "github.com/vozec/keycloak-version-finder/pkg/kcfinger"
+import "github.com/vozec/keycloak-version-detector/pkg/kcfinger"
 
 f, _ := kcfinger.New()                       // embedded DB
 res, err := f.Detect(ctx, "https://sso.example.com/")

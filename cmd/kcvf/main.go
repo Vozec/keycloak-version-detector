@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vozec/keycloak-version-finder/pkg/kcfinger"
+	"github.com/vozec/keycloak-version-detector/pkg/kcfinger"
 )
 
 func main() {
