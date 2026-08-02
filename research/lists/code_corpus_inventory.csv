@@ -3,6 +3,6 @@ app,version,lang,path,note
 typo3,14.3.5,PHP,/home/user/sources/typo3/typo3-core,full core source (git; any of 408 tags checkoutable)
 prestashop,9.1.4,PHP,/home/user/sources/code/prestashop-9.1.4,full core source
 liferay,2026.q2.0,Java,/home/user/sources/code/liferay-2026.q2.0,full core source (59660 .java)
-prestashop-modules,latest,PHP,/home/user/sources/code/prestashop-modules,71 official native modules
-typo3-extensions,latest,PHP,/home/user/sources/code/typo3-extensions,30 curated public extensions
+prestashop-modules,latest,PHP,/home/user/sources/code/prestashop-modules,194 modules (all Packagist prestashop-module: official + 3rd-party)
+typo3-extensions,latest,PHP,/home/user/sources/code/typo3-extensions,207 extensions (top-200 by Packagist downloads + curated)
 liferay-plugins,6.x,Java/JSP,/home/user/sources/liferay/liferay-plugins,classic plugins SDK

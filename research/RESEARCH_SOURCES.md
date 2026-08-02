@@ -115,8 +115,8 @@ Public plugins (R&D targets):
 
 | Ecosystem | Retrieved | How |
 |---|---|---|
-| **PrestaShop official modules** | 71 native modules (`ps_*`, dash*, stats*, blockwishlist, contactform, ps_facetedsearch, ps_checkout, psgdpr …) | authoritative list = `prestashop/*` entries in core `composer.json` → `github.com/PrestaShop/<module>` (`fetch/clone_ps_modules.sh`, `lists/ps_modules.txt`) |
-| **TYPO3 public extensions** | 30 curated high-surface extensions (news, powermail, femanager, sf_event_mgt, solr, mask, cart, flux/vhs …) | package name → Packagist p2 `source.url` → `git clone` (`fetch/clone_typo3_ext.sh`, `lists/typo3_ext_list.txt`) |
+| **PrestaShop modules** | **194** modules — every Packagist `prestashop-module` (official `ps_*`/dash*/stats* + popular third-party) | `search.json?type=prestashop-module` ranked by downloads → clone by `repository` (`fetch/clone_ps_all.sh`; official-only subset in `fetch/clone_ps_modules.sh` + `lists/ps_modules.txt`) |
+| **TYPO3 public extensions** | **207** — top-200 by Packagist installs (helhum/typo3-console, news, powermail, solr, content-defender, vhs, container …) + curated | `search.json?type=typo3-cms-extension` (download-ranked) → clone by `repository` (`fetch/clone_typo3_topN.sh`; curated seed in `fetch/clone_typo3_ext.sh`) |
 | **Liferay plugins SDK** | full clone (hooks/portlets/themes/layouttpl) | `git clone liferay/liferay-plugins` |
 | **Liferay in-tree modules** | all OSGi app modules | already inside the `liferay-portal` latest checkout under `modules/apps/**` |
 
