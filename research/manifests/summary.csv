@@ -1,0 +1,6 @@
+product,versions,files_hashed,range
+typo3,47,128045,6.2.31..14.3.5
+liferay-portal,56,45706,6.1.0-ga1..2026.q2.0
+jboss-wildfly,73,,8.0.0.Final..41.0.0.Final
+jboss-as7,5,,7.0.0..7.1.1
+jboss-as4,1,,4.2.3.GA
