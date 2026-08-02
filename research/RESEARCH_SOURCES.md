@@ -97,6 +97,35 @@ git clone --filter=blob:none https://github.com/liferay/liferay-plugins
 > Scripts currently hardcode `/home/user/sources` as the base — edit the `BASE`
 > variable at the top of each to relocate.
 
+## Full source code (latest) + public plugins — for code R&D
+
+Separate from the fingerprint asset corpus above, the **complete latest source
+trees** and **public plugin ecosystems** are materialised in the build session
+(`/home/user/sources`) for code review (routing, account handling,
+authentication, crypto). Not committed (multi-GB); the tooling + package lists
+here reproduce them. See `lists/code_corpus_inventory.csv`.
+
+| App (latest) | Lang | Source | Notes |
+|---|---|---|---|
+| **TYPO3 14.3.5** | PHP | `git clone --filter=blob:none TYPO3/typo3` → `checkout v14.3.5` | 19.4k files. Auth/crypto/routing: `typo3/sysext/core/Classes/{Authentication,Crypto,Security,Session,Http,Routing}` |
+| **PrestaShop 9.1.4** | PHP | `git clone --depth 1 --branch 9.1.4 PrestaShop/PrestaShop` | 14.5k files. Auth: `classes/Customer.php`, `classes/Employee.php`, `src/Core/`, `src/Adapter/`, `src/PrestaShopBundle/`; crypto: `classes/*Encryptor*`, PHP-Encryption/Rijndael |
+| **Liferay 2026.q2.0** | Java | `git clone --filter=blob:none --depth 1 --branch 2026.q2.0 liferay/liferay-portal` (full checkout) | 59.7k `.java`. Auth/crypto/routing: `portal-kernel/src/com/liferay/portal/kernel/security/**`, `modules/apps/**/*security*`, `portal-impl` |
+
+Public plugins (R&D targets):
+
+| Ecosystem | Retrieved | How |
+|---|---|---|
+| **PrestaShop official modules** | 71 native modules (`ps_*`, dash*, stats*, blockwishlist, contactform, ps_facetedsearch, ps_checkout, psgdpr …) | authoritative list = `prestashop/*` entries in core `composer.json` → `github.com/PrestaShop/<module>` (`fetch/clone_ps_modules.sh`, `lists/ps_modules.txt`) |
+| **TYPO3 public extensions** | 30 curated high-surface extensions (news, powermail, femanager, sf_event_mgt, solr, mask, cart, flux/vhs …) | package name → Packagist p2 `source.url` → `git clone` (`fetch/clone_typo3_ext.sh`, `lists/typo3_ext_list.txt`) |
+| **Liferay plugins SDK** | full clone (hooks/portlets/themes/layouttpl) | `git clone liferay/liferay-plugins` |
+| **Liferay in-tree modules** | all OSGi app modules | already inside the `liferay-portal` latest checkout under `modules/apps/**` |
+
+**Expansion:** TER (`extensions.typo3.org`) is blocked by egress, but **Packagist
+is reachable** — `lists/typo3_ext_packagist_all.json` holds all **4412**
+`typo3-cms-extension` package names; feed any subset to `clone_typo3_ext.sh` to
+widen the TYPO3 corpus. PrestaShop third-party/addons modules can be added the
+same way (any `github.com/<vendor>/<module>`).
+
 ## Next step (fingerprinting)
 
 Each manifest is directly consumable the way `kcvf` uses `db.json`: keep only the
