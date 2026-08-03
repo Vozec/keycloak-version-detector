@@ -59,6 +59,20 @@ Added typed sinks `Db`/`DbCore::execute()` (arg 0) and `::getValue()` (arg 0):
   against real code — v1/v2 both over-reported; v3 should cut hard (uniqid + broad
   regex were the two noise drivers). `Cookie.php` hits are the true positives.
 
+## Optimization — caching + module-scoping (answers "can't we cache?")
+Yes. Two levers, measured on `prestashop/classes` (328 files):
+- **Disk cache** (the fix for a mistake I was making: I passed `--rerun` every
+  time, which forces recomputation). Without `--rerun`, the compiled query and
+  intermediate predicates are reused: **run 1 = 52 s (cold), run 2 = 6 s** (~10×).
+  The compiled query shows `Found in cache`.
+- **Scope the database to one module**, not the whole app. A 328-file extract
+  analyses in 52 s cold / 6 s cached; the 7k-file full app was heap-bound and did
+  not finish. Tune on a module, then do one final full-app validation run.
+- Helper committed: `bench/fastscan.sh <module-dir> <query.ql…>` — extract once
+  (skips if unchanged), analyse cached. Also raise `--max-disk-cache`.
+- Heap remains the ceiling (15 GB machine → ~3.3 GB heap → stage caching is weak
+  for full-app global taint); module-scoping sidesteps it.
+
 ## Environment limitation (blocker)
 Iterative FP-tuning needs fast re-runs, but taint queries on a full app (~7k
 files) are **pathologically slow here**: the CodeQL CLI auto-caps the JVM heap

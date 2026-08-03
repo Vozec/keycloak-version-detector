@@ -253,3 +253,56 @@ index 0c0210c199b..1a7f766c440 100644
 -- 
 2.43.0
 
+From c5ebef77437923aebff230f392eb4c028bacaa3f Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Mon, 3 Aug 2026 14:50:48 +0000
+Subject: [PATCH] bench: fastscan.sh - module-scoped extract + cached analyze
+ for fast query tuning
+
+Full-app taint analysis is heap-bound and slow on modest RAM (15GB -> ~3.3GB
+heap, no stage caching). fastscan.sh scopes extraction to one module and
+re-analyses WITHOUT --rerun so the disk cache is reused: measured 52s cold ->
+6s cached on prestashop/classes (328 files).
+---
+ bench/fastscan.sh | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+ create mode 100755 bench/fastscan.sh
+
+diff --git a/bench/fastscan.sh b/bench/fastscan.sh
+new file mode 100755
+index 00000000000..3e17a4eddae
+--- /dev/null
++++ b/bench/fastscan.sh
+@@ -0,0 +1,29 @@
++#!/usr/bin/env bash
++# Fast iterate on a query while tuning: extract ONE module (not the whole app) once,
++# then analyse repeatedly hitting the disk cache (no --rerun). 10x faster than full-app.
++#   fastscan.sh <source-dir> <query.ql> [more.ql ...]
++# Env: TOOL (codeql-php root), EXT (built extractor pack). Re-extracts only if SRC changed.
++set -eu
++TOOL="${TOOL:-$(cd "$(dirname "$0")/.." && pwd)}"
++EXT="${EXT:-/tmp/php-ext}"
++SRC="$1"; shift
++DB="/tmp/fastscan-$(echo "$SRC" | tr '/ ' '__').db"
++CODEQL="$TOOL/.tooling/codeql/codeql"
++# build extractor pack if missing
++if [ ! -f "$EXT/tools/linux64/extractor" ]; then
++  ( cd "$TOOL/php/extractor" && cargo build --release >/dev/null )
++  mkdir -p "$EXT/tools/linux64"
++  cp "$TOOL/php/codeql-extractor.yml" "$TOOL/php/ql/lib/php.dbscheme" "$TOOL/php/ql/lib/php.dbscheme.stats" "$EXT/"
++  cp "$TOOL/target/release/codeql-extractor-php" "$EXT/tools/linux64/extractor"
++  cp -r "$TOOL/php/tools/"* "$EXT/tools/" 2>/dev/null || true
++fi
++# extract once (skip if the DB is newer than the source tree)
++if [ ! -d "$DB" ] || [ -n "$(find "$SRC" -newer "$DB" -name '*.php' -print -quit 2>/dev/null)" ]; then
++  echo ">> extracting $(find "$SRC" -name '*.php'|wc -l) files -> $DB"
++  "$CODEQL" database create "$DB" --language=php --source-root="$SRC" --search-path="$EXT" --ram=8000 --threads=4 --overwrite >/dev/null 2>&1
++fi
++# analyse WITHOUT --rerun so the disk cache is reused across edits
++echo ">> analysing (cache on)"; t=$(date +%s)
++"$CODEQL" database analyze "$DB" "$@" --format=csv --output=/tmp/fastscan.csv \
++  --search-path="$TOOL/php" --additional-packs="$TOOL" --threads=4 --ram=8000 --max-disk-cache=8000 >/dev/null 2>&1
++echo ">> $(($(date +%s)-t))s | $(wc -l </tmp/fastscan.csv) findings -> /tmp/fastscan.csv"
+-- 
+2.43.0
+
