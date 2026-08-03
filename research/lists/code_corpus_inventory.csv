@@ -6,3 +6,9 @@ liferay,2026.q2.0,Java,/home/user/sources/code/liferay-2026.q2.0,full core sourc
 prestashop-modules,latest,PHP,/home/user/sources/code/prestashop-modules,194 modules (all Packagist prestashop-module: official + 3rd-party)
 typo3-extensions,latest,PHP,/home/user/sources/code/typo3-extensions,207 extensions (top-200 by Packagist downloads + curated)
 liferay-plugins,6.x,Java/JSP,/home/user/sources/liferay/liferay-plugins,classic plugins SDK
+wordpress,7.0.2,PHP,/home/user/sources/code/wordpress-7.0.2,full core source
+joomla,6.1.2,PHP,/home/user/sources/code/joomla-6.1.2,full core source
+drupal,11.4.4,PHP,/home/user/sources/code/drupal-11.4.4,full core source
+wordpress-plugins,latest,PHP,/home/user/sources/code/wordpress-plugins,197 top plugins by Packagist wordpress-plugin downloads (github-sourced)
+drupal-modules,latest,PHP,/home/user/sources/code/drupal-modules,196 top modules by Packagist drupal-module downloads (github-sourced; canonical drupalcode contrib blocked by egress)
+joomla-extensions,latest,PHP,/home/user/sources/code/joomla-extensions,16 curated (joomla-extensions org + Kunena + Akeeba components)

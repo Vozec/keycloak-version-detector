@@ -126,6 +126,35 @@ is reachable** — `lists/typo3_ext_packagist_all.json` holds all **4412**
 widen the TYPO3 corpus. PrestaShop third-party/addons modules can be added the
 same way (any `github.com/<vendor>/<module>`).
 
+## More CMS: WordPress / Joomla / Drupal (latest core + plugins)
+
+| App (latest) | Lang | Core | Public plugins |
+|---|---|---|---|
+| **WordPress 7.0.2** | PHP | `git clone --depth 1 --branch 7.0.2 WordPress/WordPress` | **197** — top `wordpress-plugin` by Packagist installs (woocommerce, action-scheduler, wp-rocket, query-monitor, elasticpress …) |
+| **Joomla 6.1.2** | PHP | `git clone --depth 1 --branch 6.1.2 joomla/joomla-cms` | **16** curated — `joomla-extensions` org (weblinks, jedchecker, search), Kunena forum, Joomla-Component-Builder, Akeeba components (sociallogin, skeletonkey, com_datacompliance) |
+| **Drupal 11.4.4** | PHP | `git clone --depth 1 --branch 11.4.4 drupal/drupal` | **196** — top `drupal-module` by Packagist installs, github-sourced |
+
+Plugins fetched with `fetch/clone_packagist_type.sh <type> <pages> <dest>`
+(download-ranked, clones the `repository` when it is on GitHub) and
+`fetch/clone_list.sh` (explicit owner/repo list). Ranked reference lists:
+`lists/wordpress_plugins_ranked.tsv`, `lists/drupal_modules_ranked.tsv`,
+`lists/joomla_ext_list.txt`.
+
+### Egress blockers hit (and the workaround)
+Only **github.com (git), Packagist, Maven Central, raw.githubusercontent** are
+reachable. These plugin/source hosts are **blocked** by the session egress policy
+(HTTP 000/403) and were routed around via GitHub + Packagist:
+- `api.wordpress.org` / `downloads.wordpress.org` (official WP plugin/theme zips)
+- `git.drupalcode.org` + `www.drupal.org` / `packages.drupal.org` (canonical
+  Drupal **contrib** — so `drupal/token`, `drupal/pathauto`, `views` etc. that
+  live only on drupalcode are **missing**; the 196 fetched are the GitHub-hosted
+  subset)
+- `extensions.typo3.org` (TER)
+- Liferay/JBoss vendor CDNs & Nexus
+
+**To close those gaps** the egress allowlist would need those hosts added, or the
+zips supplied out-of-band. Everything else was obtained without them.
+
 ## Next step (fingerprinting)
 
 Each manifest is directly consumable the way `kcvf` uses `db.json`: keep only the

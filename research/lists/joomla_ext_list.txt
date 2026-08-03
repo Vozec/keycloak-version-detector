@@ -1,0 +1,16 @@
+joomla-extensions/weblinks
+joomla-extensions/jedchecker
+joomla-extensions/search
+joomla-extensions/legacy-mvc
+joomla-extensions/pkg_languagepack
+joomla-extensions/tours-toolkit
+Kunena/Kunena-Forum
+joomengine/Joomla-Component-Builder
+akeeba/sociallogin
+akeeba/skeletonkey
+akeeba/com_datacompliance
+akeeba/plg_captcha_altcha
+akeeba/plg_filesystem_s3
+akeeba/contactus
+akeeba/panopticon
+akeeba/panopticon-connector
