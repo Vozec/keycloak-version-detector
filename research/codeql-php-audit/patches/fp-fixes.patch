@@ -1,0 +1,66 @@
+diff --git a/php/ql/lib/ext/laravel.model.yml b/php/ql/lib/ext/laravel.model.yml
+index f867d133e84..024e7cd5c7c 100644
+--- a/php/ql/lib/ext/laravel.model.yml
++++ b/php/ql/lib/ext/laravel.model.yml
+@@ -15,19 +15,17 @@ extensions:
+     data:
+       - ["function", "request", "laravel-request"]
+       - ["function", "old", "laravel-request"]                 # form repopulation
+-      - ["method", "input", "laravel-request"]
+-      - ["method", "query", "laravel-request"]
+-      - ["method", "post", "laravel-request"]
+-      - ["method", "all", "laravel-request"]
+-      - ["method", "only", "laravel-request"]
+-      - ["method", "except", "laravel-request"]
+-      - ["method", "json", "laravel-request"]
+-      - ["method", "string", "laravel-request"]
+-      - ["method", "getContent", "laravel-request"]
++      # NOTE: the generic accessor names (input/query/post/all/only/except/json/string/
++      # getContent) are declared ONLY as Request-typed sources in the typedSourceModel block
++      # below. Declaring them here as untyped `method` sources made EVERY ->query()/->all()/
++      # ->json() on ANY object (PDO/mysqli/$wpdb->query(), Collection->all(), Response->json())
++      # a request source — the dominant false-positive source observed on the CMS corpus
++      # (154/156 taint findings rooted at a PDO ->query()). Keep only the distinctive names.
+       - ["method", "route", "laravel-route-parameter"]         # $request->route('id')
+-      - ["staticmethod", "input", "laravel-request"]           # Request::input()
+-      - ["staticmethod", "all", "laravel-request"]
+-      - ["staticmethod", "get", "laravel-request"]
++      - ["staticmethod", "input", "laravel-request"]           # Request::input() — distinctive
++      # `Request::all()` / `Request::get()` removed: the bare static names collide with the far
++      # more common `Model::all()` (Eloquent) and `Cache::get()`/`Config::get()` facades → FP
++      # sources. `$request->all()` / `request()->all()` stay covered by the Request-typed rows.
+ 
+   # Class-qualified request accessors: a source ONLY on a `Request` receiver, so the generic names
+   # (`get`/`header`/`cookie`/`boolean`/`file`) that collide with ordinary objects no longer FP.
+@@ -44,6 +42,9 @@ extensions:
+       - ["Request", "all", "laravel-request"]
+       - ["Request", "only", "laravel-request"]
+       - ["Request", "except", "laravel-request"]
++      - ["Request", "json", "laravel-request"]
++      - ["Request", "string", "laravel-request"]
++      - ["Request", "getContent", "laravel-request"]
+       - ["Request", "integer", "laravel-request"]
+       - ["Request", "float", "laravel-request"]
+       - ["Request", "date", "laravel-request"]
+diff --git a/php/ql/lib/ext/prestashop.model.yml b/php/ql/lib/ext/prestashop.model.yml
+index d187e3d6862..319cbf0a683 100644
+--- a/php/ql/lib/ext/prestashop.model.yml
++++ b/php/ql/lib/ext/prestashop.model.yml
+@@ -26,6 +26,17 @@ extensions:
+       - ["staticmethod", "redirectLink", 0, "open redirect"]
+       - ["staticmethod", "redirectAdmin", 0, "open redirect"]
+ 
++  # Typed SQL sinks — `execute()`/`getValue()` are generic names, so scope them to PrestaShop's DB
++  # class (`DbCore`, aliased `Db`) to stay precise. `Db::getInstance()->execute($sql)` runs a raw
++  # write/DDL query (521 uses in the 9.x corpus) and `Db::getValue($sql)` a raw single-value read —
++  # both were unmodelled recall gaps (only executeS/ExecuteS/getRow were covered).
++  - addsTo: { pack: codeql/php-all, extensible: typedSinkModel }
++    data:
++      - ["Db", "execute", 0, "SQL injection"]
++      - ["DbCore", "execute", 0, "SQL injection"]
++      - ["Db", "getValue", 0, "SQL injection"]
++      - ["DbCore", "getValue", 0, "SQL injection"]
++
+   # ---- Sanitizers -------------------------------------------------------------------------------
+   - addsTo: { pack: codeql/php-all, extensible: sanitizerModel }
+     data:

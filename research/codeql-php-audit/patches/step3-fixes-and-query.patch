@@ -1,0 +1,147 @@
+From adb609897f09a6c4e08ca988ceaf3acb8c2e206c Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Mon, 3 Aug 2026 11:56:41 +0000
+Subject: [PATCH] models: fix FP request-source collisions + add PrestaShop
+ raw-SQL sinks; new weak-randomness query
+
+- laravel: move generic accessor names (query/all/json/string/input/...) from
+  untyped sourceModel to the Request-typed block; drop Request::all()/get()
+  static facades. Untyped 'query' made every PDO/mysqli/$wpdb->query() a
+  request source (dominant FP on real code).
+- prestashop: add typed SQL sinks Db/DbCore::execute() and ::getValue()
+  (raw write/read; 521 execute() uses were unmodelled).
+- new query php/weak-security-randomness: predictable PRNG (rand/mt_rand/
+  uniqid/lcg_value) used to derive a security hash/token (CWE-338/330).
+---
+ php/ql/lib/ext/laravel.model.yml              | 25 ++++-----
+ php/ql/lib/ext/prestashop.model.yml           | 11 ++++
+ php/ql/src/Security/WeakSecurityRandomness.ql | 51 +++++++++++++++++++
+ 3 files changed, 75 insertions(+), 12 deletions(-)
+ create mode 100644 php/ql/src/Security/WeakSecurityRandomness.ql
+
+diff --git a/php/ql/lib/ext/laravel.model.yml b/php/ql/lib/ext/laravel.model.yml
+index f867d133e84..024e7cd5c7c 100644
+--- a/php/ql/lib/ext/laravel.model.yml
++++ b/php/ql/lib/ext/laravel.model.yml
+@@ -15,19 +15,17 @@ extensions:
+     data:
+       - ["function", "request", "laravel-request"]
+       - ["function", "old", "laravel-request"]                 # form repopulation
+-      - ["method", "input", "laravel-request"]
+-      - ["method", "query", "laravel-request"]
+-      - ["method", "post", "laravel-request"]
+-      - ["method", "all", "laravel-request"]
+-      - ["method", "only", "laravel-request"]
+-      - ["method", "except", "laravel-request"]
+-      - ["method", "json", "laravel-request"]
+-      - ["method", "string", "laravel-request"]
+-      - ["method", "getContent", "laravel-request"]
++      # NOTE: the generic accessor names (input/query/post/all/only/except/json/string/
++      # getContent) are declared ONLY as Request-typed sources in the typedSourceModel block
++      # below. Declaring them here as untyped `method` sources made EVERY ->query()/->all()/
++      # ->json() on ANY object (PDO/mysqli/$wpdb->query(), Collection->all(), Response->json())
++      # a request source — the dominant false-positive source observed on the CMS corpus
++      # (154/156 taint findings rooted at a PDO ->query()). Keep only the distinctive names.
+       - ["method", "route", "laravel-route-parameter"]         # $request->route('id')
+-      - ["staticmethod", "input", "laravel-request"]           # Request::input()
+-      - ["staticmethod", "all", "laravel-request"]
+-      - ["staticmethod", "get", "laravel-request"]
++      - ["staticmethod", "input", "laravel-request"]           # Request::input() — distinctive
++      # `Request::all()` / `Request::get()` removed: the bare static names collide with the far
++      # more common `Model::all()` (Eloquent) and `Cache::get()`/`Config::get()` facades → FP
++      # sources. `$request->all()` / `request()->all()` stay covered by the Request-typed rows.
+ 
+   # Class-qualified request accessors: a source ONLY on a `Request` receiver, so the generic names
+   # (`get`/`header`/`cookie`/`boolean`/`file`) that collide with ordinary objects no longer FP.
+@@ -44,6 +42,9 @@ extensions:
+       - ["Request", "all", "laravel-request"]
+       - ["Request", "only", "laravel-request"]
+       - ["Request", "except", "laravel-request"]
++      - ["Request", "json", "laravel-request"]
++      - ["Request", "string", "laravel-request"]
++      - ["Request", "getContent", "laravel-request"]
+       - ["Request", "integer", "laravel-request"]
+       - ["Request", "float", "laravel-request"]
+       - ["Request", "date", "laravel-request"]
+diff --git a/php/ql/lib/ext/prestashop.model.yml b/php/ql/lib/ext/prestashop.model.yml
+index d187e3d6862..319cbf0a683 100644
+--- a/php/ql/lib/ext/prestashop.model.yml
++++ b/php/ql/lib/ext/prestashop.model.yml
+@@ -26,6 +26,17 @@ extensions:
+       - ["staticmethod", "redirectLink", 0, "open redirect"]
+       - ["staticmethod", "redirectAdmin", 0, "open redirect"]
+ 
++  # Typed SQL sinks — `execute()`/`getValue()` are generic names, so scope them to PrestaShop's DB
++  # class (`DbCore`, aliased `Db`) to stay precise. `Db::getInstance()->execute($sql)` runs a raw
++  # write/DDL query (521 uses in the 9.x corpus) and `Db::getValue($sql)` a raw single-value read —
++  # both were unmodelled recall gaps (only executeS/ExecuteS/getRow were covered).
++  - addsTo: { pack: codeql/php-all, extensible: typedSinkModel }
++    data:
++      - ["Db", "execute", 0, "SQL injection"]
++      - ["DbCore", "execute", 0, "SQL injection"]
++      - ["Db", "getValue", 0, "SQL injection"]
++      - ["DbCore", "getValue", 0, "SQL injection"]
++
+   # ---- Sanitizers -------------------------------------------------------------------------------
+   - addsTo: { pack: codeql/php-all, extensible: sanitizerModel }
+     data:
+diff --git a/php/ql/src/Security/WeakSecurityRandomness.ql b/php/ql/src/Security/WeakSecurityRandomness.ql
+new file mode 100644
+index 00000000000..0c0210c199b
+--- /dev/null
++++ b/php/ql/src/Security/WeakSecurityRandomness.ql
+@@ -0,0 +1,51 @@
++/**
++ * @name Weak randomness used to derive a security secret or token
++ * @description A value from a predictable PRNG (rand / mt_rand / uniqid / lcg_value) is used as the
++ *              material for a security hash (md5 / sha1 / hash / hash_hmac / crypt). The resulting
++ *              secret is guessable — e.g. a predictable password-reset or CSRF token, which enables
++ *              account takeover. Use random_bytes() / random_int() instead.
++ * @kind path-problem
++ * @problem.severity warning
++ * @security-severity 7.5
++ * @precision high
++ * @id php/weak-security-randomness
++ * @tags security
++ *       external/cwe/cwe-338
++ *       external/cwe/cwe-330
++ */
++
++import codeql.php.AST
++import codeql.php.DataFlow
++import codeql.php.TaintTracking
++import codeql.php.Concepts
++
++/** A call to a non-cryptographic PRNG whose output is predictable. */
++class WeakRandomCall extends FunctionCall {
++  WeakRandomCall() { this.getName() = ["rand", "mt_rand", "uniqid", "lcg_value"] }
++}
++
++/** An argument of a hashing call — the material a secret/token is derived from. */
++class SecurityHashArg extends DataFlow::Node {
++  SecurityHashArg() {
++    exists(FunctionCall fc |
++      fc.getName() = ["md5", "sha1", "hash", "hash_hmac", "crypt"] and
++      this.asExpr() = fc.getAnArgument()
++    )
++  }
++}
++
++module Cfg implements DataFlow::ConfigSig {
++  predicate isSource(DataFlow::Node n) { n.asExpr() instanceof WeakRandomCall }
++
++  predicate isSink(DataFlow::Node n) { n instanceof SecurityHashArg }
++}
++
++module Flow = TaintTracking::Global<Cfg>;
++
++import Flow::PathGraph
++
++from Flow::PathNode source, Flow::PathNode sink
++where Flow::flowPath(source, sink)
++select sink.getNode(), source, sink,
++  "This security hash is derived from a predictable PRNG value ($@), yielding a guessable secret/token.",
++  source.getNode(), "weak randomness"
+-- 
+2.43.0
+
