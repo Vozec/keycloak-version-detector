@@ -1,0 +1,14 @@
+phpbb/phpbb
+opencart/opencart
+glpi-project/glpi
+osTicket/osTicket
+LimeSurvey/LimeSurvey
+Dolibarr/dolibarr
+salesagility/SuiteCRM
+matomo-org/matomo
+phpList/phplist3
+mautic/mautic
+phpmyadmin/phpmyadmin
+Cacti/cacti
+getgrav/grav
+roundcube/roundcubemail
