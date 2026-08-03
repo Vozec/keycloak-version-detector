@@ -59,6 +59,15 @@ queries too.)
 - Fast iteration via `bench/fastscan.sh <module> <query>` (module-scoped DB + disk
   cache; **use `--rerun` while editing a query** — otherwise stale cached results).
 
+## Genericity — applies to any PHP CMS (not per-app)
+Both changes are language/engine-level, so they hold across CMS. With the fixes,
+the SQL-injection + weak-randomness queries run to completion (module-scoped) on:
+- **PrestaShop** classes/ (328 files) — 19 s
+- **Drupal** getdkan/dkan (438 files) — 19 s, 181 alerts
+- **WordPress** wp-graphql (663 files) — 15 alerts
+No per-CMS code paths were added; only shared engine predicates and generic
+sanitizers were touched.
+
 ## Still open (generic, next)
 - PrestaShop `classes/` still yields ~263 SQLi alerts whose taint reaches the sink
   without a numeric cast (sources include `Tools::getValue` and an
