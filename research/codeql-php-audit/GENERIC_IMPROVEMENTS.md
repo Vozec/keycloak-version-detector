@@ -28,6 +28,16 @@ Measured — PrestaShop `classes/` (328 files), SQL-injection query:
 ≈ **−74 % paths, 2× faster**, recall unchanged. (Distinct alerts 279→263: the main
 win is the path explosion / performance that made full-app scans finish at all.)
 
+**The headline: it makes the full app analysable.** SQL-injection on the *whole*
+PrestaShop 9.1.4 (~7k files):
+| | paths | result |
+|---|---|---|
+| without gate | **2 314 200** | did **not** finish (killed ~30 min) |
+| **with gate** | **486 836** | **finishes in ~4 min**, 553 alerts |
+
+A previously-impossible whole-app scan now completes — the single most useful
+outcome of the change.
+
 ## 2. Numeric/boolean casts are taint barriers  (`FlowSources.qll`)
 The cast **syntax** `(int)` / `(integer)` / `(float)` / `(double)` / `(real)` /
 `(bool)` / `(boolean)` was treated as an ordinary taint-propagating expression, so
