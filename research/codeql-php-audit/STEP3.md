@@ -54,10 +54,30 @@ Added typed sinks `Db`/`DbCore::execute()` (arg 0) and `::getValue()` (arg 0):
   |---|---|---|
   | v1 | sink = any `md5/sha1/…` argument | **738** (filename/cache-key idiom) |
   | v2 | sink = setcookie value **or** assignment to a security-named target; hash is a taint step | **1179** (worse — regex `reset\|salt\|_key\|activation` + `uniqid` source + `base64/bin2hex` steps over-matched) |
-  | v3 (committed) | drop `uniqid` source; crypto-only steps; regex → strong indicators only (`token\|secret\|csrf\|nonce\|api_key\|passwd\|secure_key\|session_id`) | compiles; **measurement pending** (see note) |
-  The lesson is the real one: a "precise" query is precise only after iterating
-  against real code — v1/v2 both over-reported; v3 should cut hard (uniqid + broad
-  regex were the two noise drivers). `Cookie.php` hits are the true positives.
+  | v3 | drop `uniqid` source; strong-indicator regex; flow *through* the hash | **0** — wrong: see root cause |
+  | **v4 (final)** | sink on the hash **argument**; require hash result in a security context | **2 true positives, 0 FP** |
+
+### Root cause of the 0 (and why v1/v2 over-reported)
+`md5`/`sha1`/`hash` are **global taint sanitizers** (`php-builtins.model.yml`
+`sanitizerModel`) — correct for injection queries (a hashed value can't SQL-inject).
+So taint **never survives the hash**; v3 tried to flow *through* it with an
+`isAdditionalFlowStep`, but a per-config step cannot beat a global barrier → 0.
+(The "8 findings" I briefly saw were **stale `fastscan` cache**: without `--rerun`,
+re-running an *edited* query at the same file path returns the previous results —
+a real gotcha. Always `--rerun` while bisecting.)
+
+### The fix (v4) — sink on the hash *input*
+Sink the predictable value **entering** the hash (`h.getAnArgument()`), and require
+the hash *result* to be in a security context (assigned to a `token`/`secret`/`csrf`/
+`session`/`secure_key` field, or a `setcookie` value). Steps only through `uniqid()`
+and the `(string)` cast. On `prestashop/classes` this yields **2 precise true
+positives, 0 FP**:
+- `Customer.php:241` — `$this->secure_key = md5(uniqid((string) mt_rand(...)))`
+- `Employee.php:649` — `reset_password_token` from the same idiom → a **guessable
+  password-reset token** (account-takeover class, CWE-338).
+Non-secret uses of the same `md5(uniqid(mt_rand()))` idiom (upload filenames,
+cache keys, `$salt`) are correctly **not** flagged.
+738 → 1179 → **2**. That is the FP-tuning loop converging.
 
 ## Optimization — caching + module-scoping (answers "can't we cache?")
 Yes. Two levers, measured on `prestashop/classes` (328 files):
