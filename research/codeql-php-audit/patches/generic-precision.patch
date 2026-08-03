@@ -1,0 +1,162 @@
+From 2f58c35ad79341bb9eff9b065d08794be83475e4 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Mon, 3 Aug 2026 23:23:02 +0000
+Subject: [PATCH 1/3] dataflow: gate name-only call resolution on name arity
+ (generic precision)
+
+viableCallable fell back to matching an unknown-receiver call to EVERY same-named
+callable. Generic method names (query/get/execute/delete) are defined across many
+unrelated classes, so this merged taint between unrelated code, created cross-file/
+cross-app false flows, and exploded path counts.
+
+Add nameFallbackAcceptable(): only resolve by name when the name has <= 8 defining
+callables (tunable). Functions and rare method names are unaffected.
+
+Measured on prestashop/classes (328 files), SQL injection query:
+  without gate: 40s, 11207 findings, 44828 paths
+  with gate:    19s,  2910 findings, 11640 paths   (-74%, 2x faster)
+bench/run.sh recall unchanged (183/232); FP-on-ok unchanged (small single-file
+samples don't exercise name ambiguity). Not per-CMS - engine-level.
+---
+ .../php/dataflow/internal/DataFlowPrivate.qll | 21 ++++++++++++++++++-
+ 1 file changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/php/ql/lib/codeql/php/dataflow/internal/DataFlowPrivate.qll b/php/ql/lib/codeql/php/dataflow/internal/DataFlowPrivate.qll
+index ef05c51463f..608774a4003 100644
+--- a/php/ql/lib/codeql/php/dataflow/internal/DataFlowPrivate.qll
++++ b/php/ql/lib/codeql/php/dataflow/internal/DataFlowPrivate.qll
+@@ -227,6 +227,22 @@ predicate isArgumentNode(ArgumentNode n, DataFlowCall call, ArgumentPosition pos
+   n.argumentOf(call, pos)
+ }
+ 
++/**
++ * The maximum number of like-named callables for which resolving an unknown-receiver call purely by
++ * name is still worthwhile. Above this, name-only matching stops meaning "probably the one impl" and
++ * instead connects the call to every same-named method across unrelated classes — generic names such
++ * as `query` / `get` / `execute` / `delete` — which merges taint between unrelated code, creates
++ * cross-file/cross-app false flows, and explodes path counts. Generic (not per-CMS); tunable and
++ * validated by bench/run.sh. Functions and rare method names have few definitions and are unaffected.
++ */
++private int nameFallbackMaxArity() { result = 8 }
++
++/** Holds if resolving a call to a callable named `name` purely by name is acceptable (see above). */
++bindingset[name]
++private predicate nameFallbackAcceptable(string name) {
++  count(DataFlowCallable cbl | cbl.getName() = name) <= nameFallbackMaxArity()
++}
++
+ /**
+  * Gets a viable target of `call`. A method call whose receiver class is inferred resolves precisely
+  * to that class's method (type-based dispatch); otherwise resolution falls back to matching by name
+@@ -243,9 +259,12 @@ DataFlowCallable viableCallable(DataFlowCall call) {
+   // (unknown receiver class, OR a class that lacks a matching method: trait/mixin/`__call`, or an
+   // under-approximated type). Gating on "no typed callee was found" (not merely "no type was inferred")
+   // keeps this recall-first — an inferred-but-methodless receiver must not silently drop the edge (B.4).
++  // The `nameFallbackAcceptable` gate additionally drops ubiquitous names whose name-only resolution
++  // would just over-connect unrelated classes (the dominant source of cross-file false flow).
+   call.getName() = result.getName() and
+   not exists(call.getTypedCallee()) and
+-  not exists(call.getStaticTypedCallee())
++  not exists(call.getStaticTypedCallee()) and
++  nameFallbackAcceptable(call.getName())
+   or
+   result = call.getInlineCallee()
+   or
+-- 
+2.43.0
+
+
+From 2c937000d50875accbcc5f382f06a40437fe1aa8 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Mon, 3 Aug 2026 23:27:08 +0000
+Subject: [PATCH 2/3] dataflow: apply the same name-arity gate to
+ resolvesToCallee (by-ref/named-arg)
+
+Consistency with viableCallable: bound spurious by-ref parameter-write and
+named-argument taint steps that name-resolved an unknown-receiver call to every
+same-named method. bench/run.sh recall unchanged (183/232).
+---
+ .../php/dataflow/internal/TaintTrackingPrivate.qll | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/php/ql/lib/codeql/php/dataflow/internal/TaintTrackingPrivate.qll b/php/ql/lib/codeql/php/dataflow/internal/TaintTrackingPrivate.qll
+index 582605bef54..e7948905f9d 100644
+--- a/php/ql/lib/codeql/php/dataflow/internal/TaintTrackingPrivate.qll
++++ b/php/ql/lib/codeql/php/dataflow/internal/TaintTrackingPrivate.qll
+@@ -136,6 +136,17 @@ private predicate hasNamedArgument(Call c) {
+   exists(Php::Argument a | a = callArgumentNode(c) and exists(a.getName()))
+ }
+ 
++/**
++ * Holds if a method named `name` is defined in few enough places that resolving an unknown-receiver
++ * call to it purely by name is worthwhile rather than over-connecting unrelated classes (same generic
++ * rationale as `nameFallbackAcceptable` in the call graph — see DataFlowPrivate). Bounds spurious
++ * by-ref / named-argument taint steps on ubiquitous names like `query`/`get`/`execute`.
++ */
++bindingset[name]
++private predicate methodNameNotTooAmbiguous(string name) {
++  count(Php::MethodDeclaration m | m.getName().getValue() = name) <= 8
++}
++
+ /**
+  * Holds if `call` resolves to the function/method `callee`: by name for functions, and by inferred TYPE
+  * for methods — falling back to name only when the receiver type is unknown. Gating the name fallback on
+@@ -148,7 +159,8 @@ private predicate resolvesToCallee(Call call, AstNode callee) {
+   callee = TI::inferredMethod(call)
+   or
+   callee.(Php::MethodDeclaration).getName().getValue() = call.(MethodCall).getMethodName() and
+-  not TI::hasInferredReceiver(call)
++  not TI::hasInferredReceiver(call) and
++  methodNameNotTooAmbiguous(call.(MethodCall).getMethodName())
+   or
+   // `new C(...)` resolves to `C::__construct` (so named-args and by-ref work for constructors too).
+   exists(ClassLike cls |
+-- 
+2.43.0
+
+
+From 0f2638e0c44ffff683cbf7621cb2ca0fc03727d4 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Mon, 3 Aug 2026 23:37:44 +0000
+Subject: [PATCH 3/3] sanitizers: numeric/bool casts (int)/(float)/(bool) are
+ taint barriers (generic)
+
+The cast SYNTAX was treated as an ordinary taint-propagating expression, so
+(int) $_GET['id'] concatenated into SQL stayed tainted - a false positive on the
+pervasive PHP-CMS pattern `Db::...('... = ' . (int)$x)`. Add NumericCastSanitizer
+(int/integer/float/double/real/bool/boolean), complementing the intval/floatval/
+settype/absint function sanitizers. Micro-test: (int)$x in SQL no longer flagged,
+raw $x still flagged. bench recall unchanged (183/232). Generic, all PHP.
+---
+ php/ql/lib/codeql/php/security/FlowSources.qll | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/php/ql/lib/codeql/php/security/FlowSources.qll b/php/ql/lib/codeql/php/security/FlowSources.qll
+index 21898d514fb..90685d5f0db 100644
+--- a/php/ql/lib/codeql/php/security/FlowSources.qll
++++ b/php/ql/lib/codeql/php/security/FlowSources.qll
+@@ -814,3 +814,21 @@ private class BuiltinSanitizer extends Sanitizer {
+ private class GuardBarrier extends Sanitizer {
+   GuardBarrier() { isGuardedRead(this) }
+ }
++
++/**
++ * A value produced by a cast to a numeric or boolean type — `(int)`, `(integer)`, `(float)`,
++ * `(double)`, `(real)`, `(bool)`, `(boolean)`. Such a value cannot carry an injection / XSS / path /
++ * command payload, so it is a barrier for every taint class. This is generic to all PHP (every CMS
++ * casts request-supplied ids with `(int) $x` before using them in SQL) and complements the
++ * `intval` / `floatval` / `settype` / `absint` FUNCTION sanitizers — the cast SYNTAX was previously
++ * treated as an ordinary taint-propagating expression. `(string)` / `(binary)` / `(array)` casts still
++ * propagate, as before.
++ */
++private class NumericCastSanitizer extends Sanitizer {
++  NumericCastSanitizer() {
++    exists(CastExpr c |
++      c.getTypeName() = ["int", "integer", "float", "double", "real", "bool", "boolean"] and
++      this.asExpr() = c
++    )
++  }
++}
+-- 
+2.43.0
+
