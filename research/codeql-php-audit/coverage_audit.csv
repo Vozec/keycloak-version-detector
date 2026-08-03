@@ -1,0 +1,16 @@
+idiom,category,in_models,in_ql_queries,wordpress,prestashop,typo3,drupal,joomla,magento
+"Db->execute(raw SQL)",sql,"cakephp.model.yml ","CodeInjection.qhelp TemplateInjection.qhelp CommandInjection.qhelp ModelExtensions.qll FlowSources.qll ",0,0,0,0,0,0
+"->executeS()",sql,"prestashop.model.yml ","StoredInjection.ql FlowSources.qll ",0,0,0,0,0,0
+"mysqli_query",sql,"php-builtins.model.yml ","-",15,0,0,0,0,0
+"add_query_arg",xss-src,"wordpress.model.yml ","-",2238,0,0,0,0,0
+"->getParam()",source,"cakephp.model.yml magento.model.yml ","-",0,0,0,0,0,0
+"GeneralUtility::_GP",source,"typo3.model.yml ","-",0,0,21,0,0,0
+"Tools::getValue",source,"drupal.model.yml prestashop.model.yml ","StoredInjection.ql SemgrepAudit.ql LaravelRoutes.ql ModelExtensions.qll FlowSources.qll AccessControl.qll ",0,2897,0,0,0,0
+"shell_exec",rce,"audit.model.yml php-builtins.model.yml ","-",71,8,20,11,0,0
+"proc_open",rce,"audit.model.yml php-builtins.model.yml ","-",25,2,5,6,0,0
+"->redirect()",redirect,"audit.model.yml joomla.model.yml laravel.model.yml prestashop.model.yml symfony.model.yml yii.model.yml ","OpenRedirect.qhelp OpenRedirect.ql 2026-07-03-initial-release.md LaravelRoutes.ql FlowSources.qll ",0,0,0,0,0,0
+"unserialize",deser,"audit.model.yml magento.model.yml php-builtins.model.yml ","UnsafeDeserialization.qhelp FlowSources.qll ",258,19,157,214,46,427
+"dynamic include",lfi,"-","SemgrepAudit.ql FileInclusion.qhelp php-access-control.qls php-security.qls FlowSources.qll ",201,33,36,16,26,83
+"dynamic require",lfi,"-","SemgrepAudit.ql FileInclusion.qhelp FlowSources.qll ",450,28,179,17,18,17
+"echo (XSS sink)",xss-sink,"-","FlowSources.qll ",5208,230,46,16,6774,39
+"call_user_func",rce,"audit.model.yml php-builtins.model.yml ","FlowSources.qll ",1038,49,170,86,97,71
