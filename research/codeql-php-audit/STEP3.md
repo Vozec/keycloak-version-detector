@@ -39,17 +39,47 @@ Added typed sinks `Db`/`DbCore::execute()` (arg 0) and `::getValue()` (arg 0):
 `getValue($sql)` (raw single-value read) were previously unmodelled (only
 `executeS`/`ExecuteS`/`getRow`). Typed to the class to stay precise.
 
-## New query — `php/weak-security-randomness` (compiles ✓, precise ✓)
+## New query — `php/weak-security-randomness` (compiles ✓, but NOT precise enough yet)
 `php/ql/src/Security/WeakSecurityRandomness.ql`: taint from a predictable PRNG
-(`rand`/`mt_rand`/`uniqid`/`lcg_value`) into a security hash
-(`md5`/`sha1`/`hash`/`hash_hmac`/`crypt`) → guessable secret/token (CWE-338/330;
-e.g. predictable password-reset token → account takeover). Compiled clean and,
-on the test DB, fired **once** precisely — `ProductController.php:910` (a hash
-seeded by a weak PRNG value) — i.e. high signal, not noisy.
+(`rand`/`mt_rand`/`uniqid`/`lcg_value`) into a hash (`md5`/`sha1`/`hash`/
+`hash_hmac`/`crypt`) → guessable secret/token (CWE-338/330).
+- Compiles clean; on a tiny subset it fired once (`ProductController.php:910` =
+  `md5(uniqid((string) mt_rand(...), true))`).
+- **But on the full PrestaShop app it produced 738 findings** — far too noisy.
+  The pattern `md5(uniqid(mt_rand()))` is ubiquitous in real PHP for *non-secret*
+  values (upload filenames, cache keys, checksums). Sinking on *any* hash argument
+  is a presence-detector, not a precise security query.
+- **FP-tuning loop actually run (honest log):**
+  | iteration | change | PrestaShop findings |
+  |---|---|---|
+  | v1 | sink = any `md5/sha1/…` argument | **738** (filename/cache-key idiom) |
+  | v2 | sink = setcookie value **or** assignment to a security-named target; hash is a taint step | **1179** (worse — regex `reset\|salt\|_key\|activation` + `uniqid` source + `base64/bin2hex` steps over-matched) |
+  | v3 (committed) | drop `uniqid` source; crypto-only steps; regex → strong indicators only (`token\|secret\|csrf\|nonce\|api_key\|passwd\|secure_key\|session_id`) | compiles; **measurement pending** (see note) |
+  The lesson is the real one: a "precise" query is precise only after iterating
+  against real code — v1/v2 both over-reported; v3 should cut hard (uniqid + broad
+  regex were the two noise drivers). `Cookie.php` hits are the true positives.
+
+## Environment limitation (blocker)
+Iterative FP-tuning needs fast re-runs, but taint queries on a full app (~7k
+files) are **pathologically slow here**: the CodeQL CLI auto-caps the JVM heap
+(≈3.3 GB even with `--ram=8000`) so global-dataflow stages are recomputed per
+query (3–15 min each; one SQLi run hit a 2.3M-path explosion and did not finish;
+the v3 weak-rand eval was still running after ~8 min). So v3's number could not
+be captured this pass. To make tuning practical: run on a **single module** (a
+few hundred files) or a machine/config with a larger fixed heap.
+
+## Corrected results (an earlier note said "0 alerts" — that was premature)
+- The single-app PrestaShop **SQL-injection** run did **not** cleanly finish: the
+  path-problem export reported *"Computing up to 2,314,200 paths"* — a **path
+  explosion**. So within-app over-approximation is also significant on a real app,
+  not only the cross-app artifact. (0 SQLi *would* be plausible given PrestaShop's
+  417 `pSQL()` sanitizer uses, but the run didn't confirm a number.)
+- Takeaway: on real single apps the tool needs **path-count limits / sink
+  precision**, not just the per-app extraction hygiene from the cross-app finding.
 
 ## Status
-- Fixes + query committed to the local codeql-php repo; patch exported here.
-- A realistic **per-app** run (PrestaShop-only, ~7k files) is heavy under the
-  CLI's auto heap and was still evaluating the last dataflow queries when this
-  was written; the pipeline itself is proven (extractor built, CLI 2.26.2, first
-  run produced results). Per-app numbers can be captured on the next pass.
+- Fixes + first query committed to the local codeql-php repo; patch exported here.
+- Pipeline proven end-to-end (extractor built, CLI 2.26.2, results produced).
+- Open precision work, in priority order: (1) tighten WeakSecurityRandomness sink
+  to a security context; (2) bound/triage the SQLi path explosion on large apps;
+  (3) the cross-app name-resolution gate (library-level).
