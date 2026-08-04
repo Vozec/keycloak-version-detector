@@ -16,8 +16,9 @@ counts (the 2.3M-path SQLi blow-up on the full app).
 
 Fix: `nameFallbackAcceptable(name)` — only resolve by name when the name has ≤ 8
 defining callables (tunable). Functions and rare method names are unaffected.
-Applied at both resolution sites (`viableCallable` for the call graph;
-`resolvesToCallee` for by-ref / named-argument steps).
+Applied at all three name-only resolution sites: `viableCallable` (call graph),
+`resolvesToCallee` (by-ref / named-argument steps), and first-class-callable method
+resolution (`$obj->m(...)`) — the rule is now applied uniformly.
 
 Measured — PrestaShop `classes/` (328 files), SQL-injection query:
 | | time | paths | path-rows |
