@@ -26,6 +26,26 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
   `.html`/`.svg`) + directory-escape — still High.
 - **Verdict:** confirmed pre-auth RCE on default/typical configs. Disclose to vendor.
 
+
+## 1b. phorax/formhandler (see ext_emconf.php) — CRITICAL — pre-auth arbitrary file upload → RCE (ORIGINAL / 0-day, widely deployed)
+- **Entry:** any page with a Formhandler form (a plain contact form suffices);
+  also the unauth `eID=formhandler-ajaxsubmit` (`ext_localconf.php:14` → `Http/Submit.php`).
+- **Sink:** `Classes/Controller/Form.php::processFiles()`:
+  - `foreach ($_FILES as $sthg => $files)` (L707) iterates **every** uploaded file,
+    not just declared form fields.
+  - the only gate is `if (!isset($this->errors[$field]))` (L720) — an upload under
+    a **field name not declared in the form config** has no validator, so no error
+    is set and it passes.
+  - `$ext = substr($name, strpos($name, '.'))` keeps the original extension
+    (`shell.php` → `.php`); **no type/extension allow-list or deny-pattern** before
+    `move_uploaded_file($tmp, $uploadPath . $uploadedFileName)` (L766) into the
+    web-accessible `uploads/formhandler/tmp/`.
+- **Exploit:** POST a Formhandler form with an extra file part named arbitrarily
+  (e.g. `x`) whose filename is `shell.php` → written to `uploads/formhandler/tmp/shell.php`
+  → GET it → code execution (where `uploads/` executes PHP; else arbitrary file write).
+- **Impact > if_basic:** Formhandler is a widely-installed form builder, so the
+  exposure is broad. No CVE on record.
+
 ## 2. in2code/femanager 13.3.3 — MEDIUM — pre-auth usergroup mass-assignment → privilege escalation (ORIGINAL)
 - **Entry:** frontend registration `createAction(User $user)` (`NewController.php:61`).
 - **Cause:** `user[usergroup][0]` is an Extbase **trusted property** (rendered
