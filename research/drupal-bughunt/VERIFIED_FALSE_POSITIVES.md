@@ -82,3 +82,15 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   inside the `administer site configuration` cron-settings form. Auth-required + constrained. FP.
 - **commerce (D10/11)** `ProductVariationFieldRenderer.php:44` — `call_user_func` over core
   `#pre_render` callables (code/config-populated render pipeline), never request input. FP.
+
+## Reflected-XSS FPs — logger/routing/non-HTML sinks (maintained modules)
+- **seckit (^9.5-^11)** `SeckitExportController.php:83` — the CSP-report data goes to
+  `$this->logger->warning(...)` (`@`-prefixed → `Html::escape`'d in dblog), and the controller
+  returns an **empty `Response()`**. Nothing is reflected to the requester. The `/report-csp-violation`
+  route is anonymous but the only effect is log-spam, not XSS. FP.
+- **domain / domain_source (^10.2-^11)** `DomainSourceRouteProvider.php:32` — `getPathInfo()` is
+  consumed **entirely inside the routing subsystem** (path processors → route lookup → RouteCollection);
+  no echo/render/Response body anywhere. Not an HTML sink. FP.
+- **gdata (D6 abandonware)** `extras/info.php:49` reflects `$_SERVER['REQUEST_METHOD']` (not `$_GET`);
+  HTML metachars in the method token are rejected (400) before PHP runs → no realistic XSS. (Note: the
+  script does expose unauth `phpinfo()` on POST = env/secret disclosure — delete it from any webroot.)
