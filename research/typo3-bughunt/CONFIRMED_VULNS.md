@@ -232,6 +232,22 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - beechit/fal_securedownload 6.0.3: cross-storage folder-existence oracle via the FileTreeState eID (Low, no file bytes).
 - extcode/cart: negative cart quantities (hardening gap).
 
+### Authenticated / not pre-auth, but real (out of primary scope, recorded for completeness)
+- **gdpr-extensions-com/* `GdprManagerController::uploadImageAction` — backend editor → RCE
+  (×~19 near-identical extensions).** `$_FILES['image']['name']` → `pathinfo(…,EXTENSION)`
+  (`:302`) → `move_uploaded_file` into `fileadmin/user_upload/two_click_solution/<md5>.<ext>`
+  (`:307`) with **no extension allow-list / MIME check**, using raw `move_uploaded_file` that
+  **bypasses `BE/fileDenyPattern`**. Exposed only via the backend module (`access=user,group`,
+  not admin) — so a **low-privileged BE editor** with the gdpr module can drop `<md5>.php` →
+  RCE (privilege escalation across the boundary). 19 of 23 `gdpr-extensions-com_*` clones ship
+  the byte-identical sink; none expose it on a FE/eID/AJAX route (so **not** pre-auth). One
+  shared fix (image allow-list + `verifyFilenameAgainstDenyPattern`) covers the family.
+- **directmailteam/direct_mail_subscription 2.0.4 — low-severity open redirect.** The `backURL`
+  sanitizer (`user_feAdmin.php:150-163`) strips quotes/`<>`/`javascript:` and `scheme://host`,
+  but misses **protocol-relative `//evil.com`**, which flows into `###BACK_URL###` used as a
+  link href / JS form action. Click-based (no server `Location:`), so Low. Its authCode flow is
+  otherwise hardened (uid-bound `md5(uid||encryptionKey)`, non-empty, `strcmp`) — no IDOR/SQLi.
+
 ### Hardened in the audited (latest) version — no pre-auth finding
 apache-solr, sf_event_mgt, jweiland/events2, friendsoftypo3/tt_address,
 in2code/powermail (core sinks), innologi/decosdata (HMAC-gated), oliverklee/realty
