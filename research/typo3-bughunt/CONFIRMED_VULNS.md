@@ -91,9 +91,22 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
   → `NewsRepository::countByDate()` raw SQL. High value because news is one of the
   most-installed TYPO3 extensions. (Version→CVE "without source" result.)
 
-## 5. bvbmedia/multishop 5.1.110 — (abandoned, TYPO3 6.2–7.9) — multiple criticals flagged
-- Flagged by the version→CVE mapper as abandoned with SQLi / insecure
-  deserialization / arbitrary-file classes; dedicated source audit in progress.
+## 5. bvbmedia/multishop 5.1.110 (abandoned, TYPO3 6.2–7.9) — HIGH/CRITICAL — pre-auth SQL injection (VERIFIED)
+- **Entry (pre-auth):** the `coreshop` frontend plugin routes on
+  `?tx_multishop_pi1[page_section]=products_search` (`scripts/core.php:9-12`) → the
+  public product-search code, no auth.
+- **Sink:** `scripts/front_pages/products_search.php`. `price_filter` is taken from
+  GET (`:75`), and if it contains `-` it is `explode('-', ...)` into an array (`:78-81`);
+  then `$price_filter[0]` is interpolated **unescaped** into a single-quoted `HAVING`
+  clause `"(final_price >='" . $price_filter[0] . "' and ...)"` (`:548`), which
+  `mslib_fe::getProductsPageSet()` concatenates into `TYPO3_DB->SELECTquery()`→`sql_query()`.
+- **Exploit:** `?tx_multishop_pi1[page_section]=products_search&price_filter=1' or sleep(5) and '1'='1-9999`
+  → `HAVING (final_price >='1' or sleep(5) and '1'='1' and final_price <='9999')` →
+  time-based blind SQLi (UNION/boolean extraction of the whole DB).
+- Distinct from the historical CVE-2013-4682 (fixed in 2.0.39); this sink is still
+  present in the abandoned 5.1.110 release. Numeric params are `is_numeric`-guarded
+  and `skeyword` uses `addslashes`, so `price_filter` is the outlier.
+
 
 ---
 
