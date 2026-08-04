@@ -20,3 +20,14 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   (unforgeable). `EntityAutocompleteMatcher` runs the selection query with the access-check tag as
   the anonymous user, so only entities that user may already view are returned. Same trust model as
   core `system.entity_autocomplete`. No bypass / no disclosure. FP.
+
+## Webhook / callback endpoints properly validated
+- **feeds `/feed/{id}/{token}/push_callback` (SubscriptionController)** — `subscribe` validates
+  `getToken() !== $token` + topic + state (`:108`); `receive` validates the token **and** an
+  `X-Hub-Signature` HMAC-SHA1 before `pushImport` (`:174-183`). Token (20B) and HMAC secret (32B)
+  are per-subscription `Crypt::randomBytesBase64` CSPRNG values; the topic is pinned to the
+  admin-set feed URL (no SSRF via `hub_topic`). Forging content needs the secret. FP.
+- **imagecache (D6) `system/files/imagecache` → `imagecache_cache_private`** — `access callback
+  => TRUE`, but the callback re-checks `user_access('view imagecache '.$preset)` **and** runs
+  `hook_file_download` on the source path (`imagecache.module:416`) — the standard private-file
+  access re-check — returning 403 otherwise. No bypass. FP.
