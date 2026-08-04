@@ -162,6 +162,16 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
   is unsanitized (`:76`). Bounded to methods that exist on the class (no `__call`),
   so **not RCE** — invokes non-exposed data methods / recursion DoS
   (`strProcess=handleAjaxRequest`). Low/Med.
+- causal/routing 0.5.0: pre-auth reflected XSS. eID `routing` (`ext_localconf.php:7`
+  `eID_include`) → when `RoutingController::dispatch()` returns null (any unmatched
+  `route`), `EidController.php:35` echoes `$_SERVER['REQUEST_URI']` and
+  `$_SERVER['SERVER_NAME']` into a **text/html** 404 body with **no htmlspecialchars**.
+  `?eID=routing&x="><script>alert(document.domain)</script>`. Caveat: REQUEST_URI-based
+  reflection is subject to browser URL-encoding of `<>` (query-string payloads / non-browser
+  clients still land) — hence conditional. Med.
+- realurl (helhum) 2.1.8: **not** SQLi — UrlRewritingHook.php:769/1701 flagged, but all
+  values pass through `INSERTquery`→`fullQuoteArray`/`fullQuoteStr`, `tstamp=time()` int.
+  Well-sanitized. FP.
 - realurl 1.12.8.19: conditional 404-URL-reflection XSS + below the 1.12.9 XSS fix.
 - ecodev/tagpack 0.13.0: pre-auth reflected XSS — `pi1` echoes `piVars[searchWord|from|to]`
   and arbitrary GET params into `<input value="…">` unencoded
