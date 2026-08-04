@@ -46,6 +46,24 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - **Impact > if_basic:** Formhandler is a widely-installed form builder, so the
   exposure is broad. No CVE on record.
 
+## 1c. ameos/ameos_filemanager 3.1.2 (current, TYPO3 v13) — HIGH — pre-auth SQL injection + arbitrary file read (REGRESSION of TYPO3-EXT-SA-2017-008)
+- **SQLi (HIGH, pre-auth):** frontend file search. `ExplorerController` passes the
+  request `query` param into `FileRepository::search()`, which does
+  `$keyword = "'%" . $queryBuilder->escapeLikeWildcards($keyword) . "%'"` — the value
+  is **hand-quoted**, and `escapeLikeWildcards` (`addcslashes($v,'_%')`) does **not**
+  escape single quotes — then feeds it to `expr()->like('sys_file_metadata.title', $keyword)`
+  (Doctrine `like()` = raw concat, no parameterization). A `'` in the keyword breaks
+  out → UNION/boolean SQLi. Exploit: `...[query]=' UNION SELECT ...`.
+- **Arbitrary file read / IDOR (MED-HIGH, pre-auth):** `download`/`info` take a raw
+  `sys_file` uid; `FileService::load` uses `findByUid` with `respectStoragePage=false`
+  and no folder confinement, and `canReadFile` returns true when `fe_group_read` is
+  empty (default for unmanaged files) → anonymous download of any FAL file by uid.
+- **Upload gap (MED):** `uploadAction` skips the `allowedFileExtension` allow-list;
+  anonymous upload allowed where `fe_group_addfile` is empty (RCE bounded only by
+  core `fileDenyPattern` blocking `.php`).
+- All three regress items fixed in TYPO3-EXT-SA-2017-008 (v1.0.2) — the fixes did
+  not survive the v13 rewrite.
+
 ## 2. in2code/femanager 13.3.3 — MEDIUM — pre-auth usergroup mass-assignment → privilege escalation (ORIGINAL)
 - **Entry:** frontend registration `createAction(User $user)` (`NewController.php:61`).
 - **Cause:** `user[usergroup][0]` is an Extbase **trusted property** (rendered
