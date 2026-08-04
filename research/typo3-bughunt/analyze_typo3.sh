@@ -24,7 +24,7 @@ seen=set()
 for r in rows:
     sinkext=r[4].strip('/').split('/')[0]
     srcs=set(re.findall(r'relative:///([^/"|\]\)]+)/', r[3]))
-    if sinkext in srcs:               # keep only intra-extension flows
+    if srcs and srcs <= {sinkext}:    # STRICT: every taint source is in the sink's extension
         k=(r[0],r[4],r[5])
         if k in seen: continue
         seen.add(k)
@@ -34,7 +34,7 @@ PY
   rm -rf "$bdir" "$bdb" /tmp/tb_${bid}.csv "$listfile"
   echo "$(date +%H:%M) batch $bid done" >> "$PROG"
 }
-export -f process_batch; export CODEQL EXT ROOT Q OUT
+export -f process_batch; export CODEQL EXT ROOT Q OUT PROG
 
 echo "query,extension,sink_file,sink_line" > "$OUT"; : > "$PROG"
 # build batch list files (25 exts each)

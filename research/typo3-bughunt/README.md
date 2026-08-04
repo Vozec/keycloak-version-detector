@@ -11,9 +11,13 @@ analyze → cleanup), 2 workers, with the focused critical + XSS query set:
 SQL injection, Code injection, Command injection, Unsafe deserialization, File
 inclusion, SSRF, Path traversal, **Reflected XSS**, XXE.
 
-**Intra-extension filter (key):** a finding is kept only when the sink's
-extension appears among its taint **sources' extensions**. This drops the
-cross-extension false flows that a mixed database produces (see
+**Intra-extension filter (key, STRICT):** a finding is kept only when **every**
+taint source is in the sink's own extension. An earlier looser rule ("at least
+one source in-ext") still leaked cross-extension false flows — a finding with a
+real cross-ext source plus an incidental in-ext source slipped through (verified:
+Apache-Solr `RoutingService.php:572` flagged in a batch but **0 findings when the
+extension is analysed alone**). The strict rule (`sources ⊆ {sink-ext}`) removes
+those. This drops the cross-extension false flows that a mixed database produces (see
 `../codeql-php-audit/STEP3.md`) — the reason we batch small and filter rather
 than build one giant DB.
 
