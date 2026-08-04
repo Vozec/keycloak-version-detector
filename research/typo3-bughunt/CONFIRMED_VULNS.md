@@ -110,6 +110,14 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 
 ---
 
+## 7. caretaker/caretaker 1.0.3 — MEDIUM — pre-auth eID auth bypass → monitoring info disclosure (ORIGINAL)
+- `validApiKey()` (`Classes/eid/class.tx_caretaker_Eid.php:164-181`) builds
+  `tx_caretaker_api_key = fullQuoteStr($apiKey)`; an empty/missing `apiKey` becomes
+  `= ''`, and `tx_caretaker_api_key text NOT NULL` has no usable default → ordinary
+  `fe_users` carry an empty key. So `?eID=tx_caretaker&apiKey=&node=instance_1&addNode=1&addResult=1`
+  returns the full monitoring tree to an unauthenticated caller (when `eid.enabled=1`,
+  the intended production setting). No unserialize-of-request RCE here.
+
 ### Lower-severity / conditional (verified, for completeness)
 - realurl 1.12.8.19: conditional 404-URL-reflection XSS + below the 1.12.9 XSS fix.
 - powermail 13.1.0: `print_r($_REQUEST)` reflected into the admin spam-notification mail (Low).
