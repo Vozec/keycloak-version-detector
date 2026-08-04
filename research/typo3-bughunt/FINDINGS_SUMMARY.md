@@ -34,6 +34,11 @@ part of the deliverable (it says *why* the maintained ecosystem mostly holds).
 | 1d | **dmk/mkforms** | **12.0.5 (current)** | UPLOAD/MEDIAUPLOAD widgets omit `fileDenyPattern` (sibling SWFUPLOAD has it) → RCE |
 | 8 | chrisgruen/realty-manager | 4.0.0 | 2× pre-auth SQLi (`cityId` quoted UNION + unquoted search params) |
 
+### HIGH — pre-auth SQL injection (ORDER BY / repository)
+| # | Extension | Version | Vector |
+|---|-----------|---------|--------|
+| 11 | auba/cms-census | 1.1.1 | ORDER BY **direction** (`formate` GP) raw into v11 `addOrderBy` via anonymous `Chartcmscensus` search plugin |
+
 ### HIGH — pre-auth injection / object-injection / SSRF
 | # | Extension | Version | Vector |
 |---|-----------|---------|--------|

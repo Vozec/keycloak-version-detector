@@ -219,6 +219,22 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - **Verdict:** confirmed pre-auth object-injection primitive in a current stable release. No CVE.
   Fix: `unserialize($x, ['allowed_classes'=>false])` (it only needs the `rate` scalar anyway).
 
+## 11. auba/cms-census 1.1.1 (TYPO3 v11.5) — HIGH — pre-auth SQL injection via ORDER BY direction (ORIGINAL / 0-day)
+- **Entry (pre-auth):** the `Chartcmscensus` Extbase frontend plugin (`ext_localconf.php`
+  configurePlugin, `ChartController => 'show, search'`) — anonymous visitor on the hosting page.
+- **Sink:** `ChartController::searchAction()` reads `$sort = GeneralUtility::_GP('formate')`
+  (`ChartController.php:87`) and passes it (3rd arg) to
+  `UrlRepository::fetchSearchResult($searchData, $sortBy, $sort)`. In the repo
+  (`UrlRepository.php:116`) that value is `$formate`, used as the **ORDER BY direction**:
+  `->addOrderBy((string)$sort, $formate)` (`:131`). TYPO3 v11 `QueryBuilder::addOrderBy`
+  quote-identifier-protects the **field** (`$sort`, from `sortby`) but appends the **direction**
+  (`$formate`) **raw** to the SQL → ORDER BY-clause injection. `$formate = $formate ?: 'ASC'`,
+  and the only guard nulls it solely when the literal string equals `'null'`.
+- **Exploit:** `?id=<pid>&tx_cmscensus_chartcmscensus[controller]=Chart&tx_cmscensus_chartcmscensus[action]=search&tx_cmscensus_chartcmscensus[domain]=x&formate=ASC,(SELECT ... )`
+  → subquery/error/time-based extraction of the whole DB. (`domain` must be set to enter the
+  branch; `sortby` field is identifier-quoted so `formate` is the injectable outlier.)
+- **Verdict:** confirmed unauthenticated SQLi. Small extension, no CVE.
+
 ---
 
 ## 7. caretaker/caretaker 1.0.3 — MEDIUM — pre-auth eID auth bypass → monitoring info disclosure (ORIGINAL)
@@ -271,6 +287,16 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - extcode/cart: negative cart quantities (hardening gap).
 
 ### Authenticated / not pre-auth, but real (out of primary scope, recorded for completeness)
+- **pagemachine/ats 2.0.1 — backend-auth SQLi (ORDER BY).** `AjaxApplicationRepository::findWithQuery`
+  `->orderBy($query->getOrderBy(), $query->getOrderDirection())` (`:94-95`) — both the field and
+  the raw direction come unsanitized from `getParsedBody()['query'][orderBy|orderDirection]`
+  (`ApplicationQuery.php:257-258`). But the only caller is the backend AJAX route `ats_applications`
+  (`Configuration/Backend/AjaxRoutes.php`, `be_user` + token) — not the anonymous applicant flow.
+  Constraints elsewhere use `createNamedParameter`. Authenticated, not pre-auth.
+- **mia3/mia3_categories — backend-auth SQLi.** `$where = 'pid = ' . $_GET['id']` concatenated
+  raw into `exec_SELECTgetRows()` (`CategoryController.php:42-48`), no intval/quote — but the
+  controller is registered **only** as a `TYPO3_MODE==='BE'` module (`access=user,group`), so it
+  needs an authenticated (non-admin) backend editor. `&id=0) UNION SELECT … -- -`. Not pre-auth.
 - **jvelletti/jvchat 13.4.1 — authenticated (FE-user) stored XSS → moderator/superuser
   session theft.** Posting is gated on a logged-in frontend user (`checkAccessToRoom`), but
   chat self-registration is typical. The `m` message param (`Chat.php:124`) escapes only
