@@ -96,3 +96,17 @@ legacy/abandoned cluster (CodeQL pipeline running).
   cache content = PHP object injection where the attacker can plant/redirect to a `.N.banner.cache`.
 - **Caveat (honest):** Drupal 6-era (abandoned, low deployment); the object-injection leg needs
   attacker-controlled cache-file content. The pre-auth traversal + raw unserialize are unconditional. MED.
+
+## 6. drutex (Drupal 5, abandoned) — HIGH — pre-auth command injection → RCE (ORIGINAL, config-gated)
+- **Entry (pre-auth):** the `remote` submodule registers `drutex/remote` with **`'access' => TRUE`**
+  (anonymous) → `drutex_remote_do_render` (`drutex.module:39-42`).
+- **Sink:** `drutex_remote.inc` reads `$dpi = $_REQUEST['dpi']` and `$text = $_REQUEST['text']`
+  (`:314-315`), substitutes `$dpi` **unescaped** into the `[DPI]` placeholder of the (admin-config)
+  command template, and runs each line with `exec($cmd)` (`:353`) — **no `escapeshellarg`**. Second
+  vector: `$text` is written into the `.tex` file compiled by `latex`, enabling `\write18` shell
+  escape. `?dpi=1;id` / shell metacharacters in `dpi` inject directly.
+- **Gate (not an auth gate):** `$allowed_to_run` requires `drutex_remote_rendering_enabled==1`
+  (off by default) and passing an `eregi()`-based IP allow-list (weak matching). When the site is
+  deployed as a DruTeX **remote-render server** (its intended role), it is unauthenticated RCE.
+- **Caveat:** Drupal 5-era (abandoned), and exploitation requires the remote-render config enabled.
+  But no Drupal login is involved and the injection is unescaped. HIGH (config-conditional).

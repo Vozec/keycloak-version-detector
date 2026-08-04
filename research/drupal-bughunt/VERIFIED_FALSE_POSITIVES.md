@@ -94,3 +94,13 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **gdata (D6 abandonware)** `extras/info.php:49` reflects `$_SERVER['REQUEST_METHOD']` (not `$_GET`);
   HTML metachars in the method token are rejected (400) before PHP runs → no realistic XSS. (Note: the
   script does expose unauth `phpinfo()` on POST = env/secret disclosure — delete it from any webroot.)
+
+## Command-injection cluster — CLI-only / escaped / admin-gated
+- **cvslog** `xcvs-loginfo.php:151`, `xcvs-config.php:267` — CVS **server hook scripts**
+  (`#!/usr/bin/php`, input from `argv`/`STDIN`/`$_ENV[CVSROOT]`, no `$_GET/$_POST`); require CVS
+  commit access, not HTTP, and `xcvs/.htaccess` denies web access to `.php`. Not a web finding.
+- **securesite** `securesite.inc:153` — runs anonymously in `hook_boot`, but every request value
+  (`PHP_AUTH_DIGEST`, method, request_uri) is `escapeshellarg()`'d before `exec()`; the only
+  unescaped part is a config path. FP.
+- **nutch** `nutch.admin.inc:202/211` — reachable only via `admin/settings/nutch/*` behind
+  `administer nutch`, and every command component is `escapeshellarg()`'d. Auth-required + escaped. FP.
