@@ -155,7 +155,18 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
   the intended production setting). No unserialize-of-request RCE here.
 
 ### Lower-severity / conditional (verified, for completeness)
+- geraldloss/glcrossword 9.0.0 (TYPO3 v13): pre-auth **unsafe dynamic dispatch**.
+  FE middleware `?PSR-15-eID=glcrossword` (`RequestMiddlewares.php`, after
+  `cms-frontend/authentication`, anonymous OK) → `GlcrosswordAjax.php:82`
+  `$this->$strProcess($id,$params)` where `strProcess = getQueryParams()['strProcess']`
+  is unsanitized (`:76`). Bounded to methods that exist on the class (no `__call`),
+  so **not RCE** — invokes non-exposed data methods / recursion DoS
+  (`strProcess=handleAjaxRequest`). Low/Med.
 - realurl 1.12.8.19: conditional 404-URL-reflection XSS + below the 1.12.9 XSS fix.
+- ecodev/tagpack 0.13.0: pre-auth reflected XSS — `pi1` echoes `piVars[searchWord|from|to]`
+  and arbitrary GET params into `<input value="…">` unencoded
+  (`class.tx_tagpack_pi1.php:302/316/321/366`). Its `ajaxsearch_server.php` `pid` SQLi
+  is backend-auth only. Med.
 - powermail 13.1.0: `print_r($_REQUEST)` reflected into the admin spam-notification mail (Low).
 - cundd/rest 5.1.0: API-key brute-force (no rate limit); mass-disclosure only if `paths.*.read=allow` misconfigured.
 - beechit/fal_securedownload 6.0.3: cross-storage folder-existence oracle via the FileTreeState eID (Low, no file bytes).
