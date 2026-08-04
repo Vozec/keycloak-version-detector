@@ -214,6 +214,14 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - realurl (helhum) 2.1.8: **not** SQLi — UrlRewritingHook.php:769/1701 flagged, but all
   values pass through `INSERTquery`→`fullQuoteArray`/`fullQuoteStr`, `tstamp=time()` int.
   Well-sanitized. FP.
+- simonschaufi/ve_guestbook 3.3.0 (TYPO3 7.6): pre-auth **stored XSS** (default config).
+  Anonymous `FORM` submit (`USER_INT`, `pi_checkCHash=false`); fields stored after only
+  `removeBadHTML()` (`:690`) — a TYPO3 **blocklist, not an encoder** (no `<`/`>`/`"` encoding;
+  bypass `<img src=x alt=">" onerror=alert(document.cookie)>`). Rendered with **no
+  htmlspecialchars** — `###GUESTBOOK_FIRSTNAME###=cutDown($row['firstname'])` (`:521`),
+  `###GUESTBOOK_ENTRY###=nl2br($row['entry'])` (`:568`) etc. via `substituteMarkerArrayCached`
+  into the HTML template. Every visitor loading the LIST page executes the payload. Gated only
+  if `manual_backend_release=1` (approval-before-display) — **default off**. Med.
 - realurl 1.12.8.19: conditional 404-URL-reflection XSS + below the 1.12.9 XSS fix.
 - ecodev/tagpack 0.13.0: pre-auth reflected XSS — `pi1` echoes `piVars[searchWord|from|to]`
   and arbitrary GET params into `<input value="…">` unencoded

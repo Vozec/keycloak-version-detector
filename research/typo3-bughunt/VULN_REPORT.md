@@ -1994,6 +1994,118 @@ in this codebase, and the fixes are visible in-source:
 Administrators should still track the vendor's security releases, but 9.0.1 carries no outstanding
 known vulnerability.
 
+### directmailteam_direct-mail-subscription
+
+#### Security Audit — directmailteam / direct_mail_subscription
+
+- **Extension key:** `direct_mail_subscription`
+- **Version:** 2.0.4 (`ext_emconf.php:18`)
+- **TYPO3 compat:** 7.0.0 – 8.99.99 (`ext_emconf.php:38`); depends on `tt_address`
+- **Audited files:** `Classes/user_feAdmin.php` (namespaced port of the classic `fe_adminLib.inc`), `pi/class.dmailsubscribe.php`, `static/setup.txt`, `pi/fe_admin_dmailsubscrip.tmpl`, `Configuration/TCA/Overrides/tt_address.php`
+- **Auth level of the whole plugin:** anonymous frontend (`USER_INT`, `tt_content.list.20`). The table operated on is **`tt_address`** (`static/setup.txt:27`), not `fe_users`.
+
+## Summary verdict
+
+This is the **post-hardening** version of `fe_adminLib`. The historically-vulnerable spots (auth-code, IDOR, SQLi, open-redirect/XSS) are all mitigated in this code. No pre-auth record-tampering, privesc, or SQLi is exploitable. One residual **low-severity, click-based open-redirect** exists via a protocol-relative `backURL` that the URL sanitizer fails to strip.
+
+---
+
+## Issue 1 — Auth-code bypass / IDOR → **FALSE POSITIVE (hardened)**
+
+**Generation** — `authCode()` `Classes/user_feAdmin.php:1763`:
+```php
+$value .= $r[$field].'|';                       // "uid|"   (authcodeFields = uid)
+$value .= $extra.'|'.$this->conf['authcodeFields.']['addKey'];   // "|"  (addKey empty)
+$value .= $GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'];   // site secret
+return substr(md5($value), 0, $l);              // l = codeLength = 8
+```
+Configured as `authcodeFields = uid` (`static/setup.txt:79`). So the per-record token is `substr(md5("<uid>||" . encryptionKey), 0, 8)` — bound to the record uid and **salted with the site `encryptionKey`**, which an attacker does not possess.
+
+**Comparison** — `aCAuth()` `Classes/user_feAdmin.php:1746`:
+```php
+if ($this->authCode && !strcmp($this->authCode, $this->authCode($r))) { return true; }
+```
+- Requires a **non-empty** `aC` (`$this->authCode &&`) → no empty-token-matches-empty bypass.
+- Uses `strcmp()` (exact), not loose `==` → no type-juggling (`0e...` / array) bypass.
+- If `authcodeFields` were unset, `authCode()` returns `NULL`; `strcmp('<nonempty>', '')` ≠ 0 → still no bypass. (Config sets it anyway.)
+
+**Edit path** `save()` `:894` and delete `deleteRecord()` `:961` both gate on `loginUser || aCAuth($origArr)` and then `aCAuth($origArr) || DBmayFEUserEdit(...)`. The uid to edit comes from `FE[tt_address][uid]` / `rU` (attacker-controlled), but `aCAuth` recomputes the token from *that* record — so editing/deleting record N requires the `aC` that was e-mailed to record N's owner (`###SYS_AUTHCODE###`, `compileMail():1630`). No IDOR: you cannot forge another record's token without `encryptionKey`.
+
+Residual weakness (not exploitable): the token is a truncated 8-hex md5 (~32 bits) compared with `strcmp` (not `hash_equals`). Online brute force (~4e9 requests/record) and network-timing side-channels are impractical. Not a confirmed finding.
+
+**Verdict: FALSE POSITIVE — hardened** (`encryptionKey`-salted per-record hash, non-empty + `strcmp` exact compare).
+
+---
+
+## Issue 2 — SQL injection (`rU` / `aC` / uid / `cmd`) → **FALSE POSITIVE (hardened)**
+
+Every request-derived identifier reaches the DB through an integer cast or a quoting API:
+
+- `DBgetDelete()` `:1962` and `DBgetUpdate()` `:2003`: `$uid = (int)$uid;` before `uid=' . $uid`.
+- `procesSetFixed()` `:1257`: `$theUid = intval($this->recUid);`.
+- `sys_page->getRawRecord()` / `getRecordsByField()` (used for `rU`, infomail `fetch` `:1583`, `uniqueLocal`/`uniqueGlobal` `:713`,`:723`) quote values via `fullQuoteStr` internally.
+- `pi/class.dmailsubscribe.php`: `makeCheckboxes()` `:115` `uid_local='.intval($addressUid)` and `pid='.intval($pid)`; `saveRecord()` `:172-210` uses `intval()` on every uid and `is_numeric($uid)` on category keys, values passed as bound `exec_INSERTquery` arrays.
+- `$lockPid` `:1156` = `intval($this->thePid)`; `$pidLock` `:1565` uses `$this->thePid` (from TS/`TSFE->id`, int).
+
+No raw concatenation of an un-cast request string into SQL anywhere.
+
+**Verdict: FALSE POSITIVE — hardened** (intval + `fullQuoteStr`/bound params throughout).
+
+---
+
+## Issue 3 — Mass-assignment (usergroup / admin / privesc) → **FALSE POSITIVE (N/A)**
+
+Writable fields are the **intersection** of the TCA `fe_admin_fieldList` and the TypoScript `fields` list, enforced twice:
+- `save()` `:896`/`:910`: `array_intersect(explode(',', $this->fieldList), trimExplode(',', $this->conf['edit.']['fields']))`.
+- `DBgetUpdate()` `:2008` / `DBgetInsert()` `:2077`: only keys passing `GeneralUtility::inList($fieldList, $f)` are written; `unset($dataArr['uid'])`.
+
+Configured target is **`tt_address`** with `fe_admin_fieldList = …,hidden,gender,name,email,first_name,last_name,company` (`Configuration/TCA/Overrides/tt_address.php:6`) and `edit.fields = gender,name,email,module_sys_dmail_category,module_sys_dmail_html` (`static/setup.txt:58`). No `usergroup`, `admin`, `be_users`, or `fe_group` field is in scope — `tt_address` has none, and none is listed. `overrideValues.hidden = 1` (`:75`) force-hides new subscriptions server-side. The `fe_crgroup_id`/`fe_userOwnSelf` branch (`save():915`) only runs for `theTable == 'fe_users'` (not this config) and `intval()`s the group anyway.
+
+**Verdict: FALSE POSITIVE** — field allow-list enforced; no privilege field reachable in this configuration. (Generic note: an integrator who added `usergroup` to both the TCA `fe_admin_fieldList` **and** `edit.fields` on an `fe_users` deployment could reintroduce mass-assignment — NEEDS-CONFIG for such misuse, not the shipped config.)
+
+---
+
+## Issue 4 — Open redirect / XSS via `backURL` → **PARTIALLY HARDENED (low-severity open redirect, protocol-relative bypass)**
+
+Sanitizer, `init()` `Classes/user_feAdmin.php:150-163`:
+```php
+$this->backURL = GeneralUtility::_GP('backURL');
+if (strstr($this->backURL,'"') || strstr($this->backURL,"'") ||
+    preg_match('/(javascript|vbscript):/i',$this->backURL) ||
+    stristr($this->backURL,'fromcharcode') ||
+    strstr($this->backURL,'<') || strstr($this->backURL,'>')) {
+    $this->backURL = '';                                   // blocks XSS / JS URLs
+}
+$this->backURL = preg_replace('|[A-Za-z]+://[^/]+|', '', $this->backURL);  // strips scheme://host
+```
+
+- **XSS: blocked.** Quotes and `< >` are stripped, so the value cannot break out of the `href="…"` (template lines 384/403) or the single-quoted JS action `document.forms[0].action='###BACK_URL###'` (`pi/fe_admin_dmailsubscrip.tmpl:93`); `javascript:`/`vbscript:`/`fromCharCode` are rejected.
+- **Absolute-host redirect: blocked** — `http://evil.com/x` → host stripped → `/x`.
+- **Residual gap:** the regex requires `scheme://`; a **protocol-relative** URL `//evil.com/x` has no scheme and survives unchanged. It is then emitted into `###BACK_URL###` and used as a link `href` (`.tmpl:384`, `:403`) and as a form action (`.tmpl:93`). A victim who clicks "Go back…" (or the Cancel button) is sent to the attacker origin.
+
+Exploit request (frontend page carrying the plugin):
+```
+GET /subscribe-page?backURL=//evil.example/phish
+```
+→ rendered page contains `<a href="//evil.example/phish">Go back…</a>` and `onClick="document.forms[0].action='//evil.example/phish';"`.
+
+This is **click-based**, not an automatic server-side `Location:` redirect (no `header('Location')` uses `backURL`), so severity is low (phishing pivot / form-target hijack), and it depends on the shipped template rendering `###BACK_URL###` unencoded (it does; the `###BACK_URL_HSC###`/`_ENC###` safe variants exist but are not used in these links).
+
+**Verdict: PARTIALLY HARDENED — low-severity, click-based open redirect** via protocol-relative `backURL`; XSS and absolute-host redirect are blocked. Auth level: anonymous frontend.
+
+---
+
+## Overall
+
+| Issue | Verdict |
+|---|---|
+| Auth-code bypass / IDOR | FALSE POSITIVE — hardened (encryptionKey-salted per-record hash, `strcmp`, non-empty) |
+| SQLi (`rU`/`aC`/uid/`cmd`) | FALSE POSITIVE — hardened (intval + quoting/bound params) |
+| Mass-assignment / privesc | FALSE POSITIVE — field allow-list; `tt_address` has no privilege fields |
+| Open redirect (`backURL`) | PARTIALLY HARDENED — low-severity click-based open redirect via `//host` protocol-relative bypass |
+
+No pre-auth CONFIRMED record-tampering / privesc / SQLi / RCE. The one residual finding is a low-severity open redirect.
+
 ### directmailteam_direct-mail
 
 #### Security Audit — `directmailteam/direct-mail` (v9.5.2)
@@ -3009,6 +3121,106 @@ No `Configuration/RequestMiddlewares.php`, no eID registration, no reaction hand
 - **Historical class — reflected/stored XSS in list/detail output:** current templates carry no raw-output view helpers and rely on Fluid escaping; no request-reflected sink found.
 - No public CVE is known to affect **tt_address 10.0.1** (current release for TYPO3 v13.4/v14). No remediation required for the pre-auth threat model; the only hardening suggestion is enabling `detail.checkPidOfAddressRecord` where folder scoping of detail views is desired (Finding 2).
 
+### gdpr-extensions-com_gdpr-extensions-com-gmap
+
+#### Security Audit — gdpr-extensions-com / gdpr_extensions_com_gmap
+
+- **Extension key:** `gdpr_extensions_com_gmap` (composer/title: "GDPR-Extensions-com - Google Map 2xClick Solution")
+- **Version:** 1.0.3 (`ext_emconf.php:11`)
+- **TYPO3 compat:** 11.5.0 – 12.4.99 (`ext_emconf.php:14`)
+- **Audited file:** `Classes/Controller/GdprManagerController.php` (+ registration in `ext_localconf.php`, `ext_tables.php`, `Configuration/Backend/Modules.php`, and the FE controller `GdprGooglemapsController.php`)
+
+## Controller auth level — the decisive question
+
+`GdprManagerController` (which contains `uploadImageAction`, `listAction`, `updateAction`, `deleteAction`) is registered in **two** ways, and only the backend one exposes the dangerous actions:
+
+1. **Backend module** — `Configuration/Backend/Modules.php:19-31` (TYPO3 v12) and `ext_tables.php:30-45` (`registerModule`, v≤11). Sub-module `gdprgooglemaps`, `access => 'user,group'`, `controllerActions` = `list, index, show, new, create, edit, update, delete, uploadImage`. → **requires an authenticated `be_user`** who has the module.
+2. **Frontend plugin** — `ext_localconf.php:5-17` `configurePlugin('GdprExtensionsComGmap','gdprgooglemaps', …)`. The **1st (authoritative) controllerActions array lists only** `GdprGooglemapsController => 'index'`. `GdprManagerController` appears **only in the 2nd (non-cacheable) array** (`create, update, delete`).
+
+In TYPO3 v11/v12 `ExtensionUtility::configurePlugin()` iterates the **first** array to register plugin controllers; a controller present only in the non-cacheable array is **never registered** and its actions are **not routable** from the frontend. Therefore, via the frontend plugin, only `GdprGooglemapsController::indexAction` (read-only map render, `GdprGooglemapsController.php:65`) is reachable. `uploadImage`, `list`, `update`, `delete`, `create` are **not** frontend-reachable.
+
+No other pre-auth entry point exists: there is **no `eID`**, **no `Configuration/Backend/AjaxRoutes.php`**, and `uploadImage` appears in no routing/plugin config (verified by grep). The `uriFor('uploadImage')` calls (`:130,:172,:207`) only build backend-module URLs consumed by the module's own templates/JS.
+
+**Conclusion: every sensitive action, including the file upload, is backend-authenticated. Nothing here is reachable pre-auth.**
+
+---
+
+## Issue B1 — Unrestricted file upload → RCE in `uploadImageAction` → **CONFIRMED, but BACKEND-authenticated (NOT pre-auth)**
+
+Sink, `Classes/Controller/GdprManagerController.php:290-313`:
+```php
+if (!empty($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
+    $twoClickFolder = Environment::getPublicPath().'/fileadmin/user_upload/two_click_solution/';
+    ...
+    $originalFileName = basename($_FILES['image']['name']);
+    $fileExtension    = pathinfo($originalFileName, PATHINFO_EXTENSION);   // attacker-controlled ext
+    $newFileName      = $fileHash . '.' . $fileExtension;                  // md5.<ext>
+    $targetPath       = $twoClickFolder . $newFileName;
+    if (move_uploaded_file($filePath, $targetPath)) { ...                  // no allow-list, no fileDenyPattern
+```
+
+Tainted chain: `$_FILES['image']['name']` → `pathinfo(..., PATHINFO_EXTENSION)` (`:302`) → `$newFileName` (`:303`) → `move_uploaded_file()` (`:307`) into web-servable `fileadmin/user_upload/two_click_solution/`.
+
+- **No extension allow-list / no MIME check.** The filename extension is taken verbatim; `x.php`/`x.phtml` is written as `<md5>.php`.
+- **Bypasses TYPO3's `BE/fileDenyPattern`.** This uses raw `move_uploaded_file`, not FAL, so the platform control that normally blocks executable uploads does not apply. A **low-privileged backend editor** who has the "gdpr" module (`access => user,group`, not admin-only) can drop a PHP webshell even though they could not do so via the File module → **privilege escalation to RCE**.
+- Response returns the public URL of the stored file (`:311`), giving the attacker the exact path to invoke.
+
+Trigger (requires a valid backend session + module CSRF token — i.e. an authenticated be_user driving the module):
+```
+POST /typo3/module/gdpr/gdprgooglemaps?…&action=uploadImage&…token=<beToken>
+Content-Type: multipart/form-data
+  image=@shell.php
+→ 200 {"url":"fileadmin/user_upload/two_click_solution/<md5>.php"}
+then: GET /fileadmin/user_upload/two_click_solution/<md5>.php  → code execution
+```
+
+**Verdict: CONFIRMED arbitrary-file-upload → RCE, authentication level = BACKEND (`be_user`, module access `user,group`). NOT pre-auth.** Real-world impact: RCE for any authenticated backend user with the gdpr module, bypassing `fileDenyPattern` (editor→RCE privesc). It is **not** an anonymous/internet-facing RCE because `uploadImage` is not exposed on the frontend plugin, via eID, or via any AJAX route.
+
+Secondary (same action, backend-only): the `forCookie` branch (`:270-287`) unconditionally `DELETE`s the whole `…_cookiewidget` table and inserts request-controlled `cookieWidgetImageValue`/`cookieWidgetPositionValue`. Backend-authenticated data tampering; low impact.
+
+---
+
+## Issue B2 — SQLi in manager actions → **FALSE POSITIVE**
+
+All queries use Doctrine `QueryBuilder`:
+- `listAction` delete uses `createNamedParameter($twoClickSolutions, Connection::PARAM_STR_ARRAY)` (`:93`); insert uses bound `->values([...])` (`:112`).
+- `uploadImageAction` cookiewidget insert uses bound `->values([...])` (`:281`).
+- FE `GdprGooglemapsController::indexAction` uses `->like('extension_title', createNamedParameter('%googlemaps%'))` (`GdprGooglemapsController.php:71`) — constant, bound.
+
+No request value is concatenated into SQL. **FALSE POSITIVE.**
+
+---
+
+## Issue B3 — IDOR in manager actions → **FALSE POSITIVE (backend-scoped)**
+
+`edit/update/delete/show` map a `GdprManager` by uid via Extbase argument mapping. These are reachable **only through the backend module** (`be_user` auth). A backend user acting on any `GdprManager` row is within the module's intended scope; there is no tenant/ownership boundary being crossed and no frontend exposure. **FALSE POSITIVE** (no anonymous IDOR).
+
+Note: `listAction` also has a destructive side effect — it `DELETE`s `…_gdprmanager` rows whose `extension_title` is not in the currently-loaded extension set on every load (`:88-96`), and contains dead code after an unconditional `return $this->redirect('edit', …)` at `:143` (lines `:145-149` never execute). Logic/data-loss bug, backend-only, not attacker-controlled.
+
+---
+
+## Generalization across the `gdpr-extensions-com_*` family
+
+Confirmed by grep over the sibling extensions in the tree:
+- **23** `gdpr-extensions-com_*` directories present.
+- **19** ship a `Classes/Controller/GdprManagerController.php` containing the identical `move_uploaded_file` upload with `pathinfo(..., PATHINFO_EXTENSION)` and **no allow-list**.
+- **In 0 of them** is `uploadImage` registered on a frontend plugin / eID / AJAX route (every clone's `ext_localconf.php` lists only `Gdpr<X>Controller => 'index'` in the authoritative array and `GdprManagerController => 'create, update, delete'` in the ignored non-cacheable array — e.g. `…-youtube/ext_localconf.php:9,14`). The three clones carrying a `Configuration/Extbase/AjaxRoutes.php` (`-grl`, `-grt`, `-gt`) use a **non-standard path TYPO3 does not load** and target a different `myAjaxAction`, not `uploadImage`.
+
+**The B1 finding generalizes to all ~19 clones with the same verdict: CONFIRMED backend-authenticated arbitrary-file-upload → RCE (fileDenyPattern bypass / editor privesc), NOT pre-auth.** Fixing the shared `uploadImageAction` (add an image-extension allow-list + route through FAL / `GeneralUtility::verifyFilenameAgainstDenyPattern`) fixes the whole family.
+
+---
+
+## Overall
+
+| Issue | Verdict |
+|---|---|
+| `uploadImageAction` unrestricted upload → RCE | **CONFIRMED — backend (`be_user`) authenticated**, NOT pre-auth; bypasses `fileDenyPattern` (editor→RCE). Generalizes to ~19 clones. |
+| SQLi (manager actions) | FALSE POSITIVE — QueryBuilder bound params throughout |
+| IDOR (manager actions) | FALSE POSITIVE — backend-module-scoped; no frontend exposure |
+| `forCookie` table wipe/insert | backend-only data tampering, low impact |
+
+No anonymous/pre-auth exploitation path exists in this controller: `uploadImage` and all mutating manager actions are exposed only via the backend module (`access => user,group`); the frontend plugin exposes only the read-only map `indexAction`.
+
 ### georgringer_news
 
 #### Security Audit: georgringer/news (TYPO3 "News system")
@@ -3645,6 +3857,72 @@ No dedicated public advisory (TYPO3-EXT-SA / GHSA / CVE) was found for `if_basic
 
 **Sources:** [TYPO3-CORE-SA-2021-002 (Unrestricted File Upload in Form Framework)](https://typo3.org/security/advisory/typo3-core-sa-2021-002), [TYPO3-CORE-SA-2025-014 (Unrestricted File Upload in FAL)](https://typo3.org/security/advisory/typo3-core-sa-2025-014), [CVE-2025-47939 advisory](https://github.com/advisories/GHSA-9hq9-cr36-4wpj)
 
+### ipf_bib
+
+#### Security Audit — `ipf/bib` (Bib — bibliography manager)
+
+- **File audited:** `pi1/class.tx_bib_pi1.php` (3532 lines) + SQL-bearing helpers (`Classes/Utility/ReferenceReader.php`, `Classes/Utility/DbUtility.php`).
+- **Version:** 1.6.1 (`state = beta`) — `ext_emconf.php:7`
+- **TYPO3 compat:** `6.2.0 - 7.99.99`, PHP `5.5.0 - 7.0.99` — `ext_emconf.php`
+- **Note:** `ipf_bib/pi1/class.tx_bib_pi1.php` is **byte-identical** to `subugoe_bib/pi1/class.tx_bib_pi1.php` (`diff` confirms identical, same author Ingo Pfennigstorf, same version). Findings are identical.
+- **Reachability:** Anonymous frontend list/search plugin. Search (`piVars['search']['all']`, `['ref_ids']`, `['all_rule']`), pagination (`piVars['page']`), single view (`piVars['show_uid']`) reachable by any visitor. Editor/import/delete are gated behind `edit_mode` (`:195`), requiring a valid BE user or whitelisted FE user plus `editor.enabled`.
+
+---
+
+## Issue 1 — Only raw SQL in pi1 (`checkFEauthorRestriction`) → **FALSE POSITIVE (gated + not request-tainted)**
+
+`:3087-3091`:
+
+```php
+$res = $this->getDatabaseConnection()->exec_SELECTquery(
+    'fe_user_id',
+    'tx_bib_domain_model_author as a, tx_bib_domain_model_authorships as m',
+    'a.uid = m.author_id AND m.pub_id = ' . $publicationId
+);
+```
+
+`$publicationId` = `$pub['uid']` from the caller (`:2353`) — a DB-sourced integer, not request input. Block runs only when `$editMode` is true (`:2352`, requires authenticated BE/whitelisted FE user via `:190-195`) and `conf['FE_edit_own_records'] != 0` (TS, `:3084`). Not pre-auth, not tainted.
+
+**Verdict: FALSE POSITIVE.**
+
+---
+
+## Issue 2 — Anonymous search terms → SQL → **hardened**
+
+`piVars['search']['all']` / `['ref_ids']` (`pi1:1209-1233`) → `extConf['filters']` → `ReferenceReader` → `exec_SELECTquery`.
+- `ref_ids`: `GeneralUtility::intExplode` → integers (`pi1:1211`).
+- Search words: reach SQL only via `fullQuoteStr` — `ReferenceReader.php:1140` (`... LIKE $word`), also `:529`, `:665`, `:1021`, `:1220`.
+- Numeric filters (years/uid/states/rule/types): `intval` / `implode_intval` (`pi1:945-1039`).
+- `show_uid`: `intval` (`pi1:1381`); `page`: `Utility::crop_to_range` numeric clamp (`pi1:1481`).
+
+**Verdict: hardened.**
+
+---
+
+## Issue 3 — ORDER BY built by raw concatenation → **FALSE POSITIVE (FlexForm-driven)**
+
+`ReferenceReader.php:1368-1370` concatenates `$filter['sorting'][$i]['field'] . ' ' . [...]['dir']` into `ORDER BY` (unquotable identifier sink). But `filters['sort']['sorting']` is populated only from FlexForm `sorting` (`pi1:346`, `initializeSortingFilter :1500-1563`), `date_sorting` FlexForm/TS, or hard-coded table-prefixed field lists. No `piVars`/`_GP` reaches it — it is backend-editor config, not attacker input.
+
+**Verdict: FALSE POSITIVE.**
+
+---
+
+## Issue 4 — Pre-auth stored/reflected XSS
+Rendered data is editor-curated bibliography records; anonymous create/edit is behind `edit_mode` (`:195`). No anonymous write→display path. Not a pre-auth finding.
+
+---
+
+## Summary
+
+| Issue | Verdict |
+|---|---|
+| Raw SQL `checkFEauthorRestriction` (`:3087`) | **FALSE POSITIVE** — auth-gated; `$publicationId` DB-sourced int |
+| Anonymous search terms → SQL | **hardened** — `intExplode` / `fullQuoteStr` |
+| ORDER BY concatenation | **FALSE POSITIVE** — FlexForm/TS config, not request |
+| Pre-auth stored XSS | Not present |
+
+*(Identical source to `subugoe_bib`; see `subugoe_bib.md` for the same analysis.)*
+
 ### jweiland_events2
 
 #### Security Audit — jweiland/events2
@@ -4121,6 +4399,87 @@ No PSR-15 middleware. Command controllers (`GrabberCommandController`, `UpdatePo
 
 **No confirmed pre-auth vulnerability.** The single anonymous entry point is token-gated and has no injection sink.
 
+### subugoe_bib
+
+#### Security Audit — `subugoe/bib` (Bib — bibliography manager)
+
+- **File audited:** `pi1/class.tx_bib_pi1.php` (3532 lines) + SQL-bearing helpers it delegates to (`Classes/Utility/ReferenceReader.php`, `Classes/Utility/DbUtility.php`).
+- **Version:** 1.6.1 (`state = beta`) — `ext_emconf.php:7`
+- **TYPO3 compat:** `6.2.0 - 7.99.99`, PHP `5.5.0 - 7.0.99` — `ext_emconf.php`
+- **Note:** This file is **byte-identical** to `ipf_bib/pi1/class.tx_bib_pi1.php` (`diff` = identical). Same findings apply to both forks.
+- **Reachability:** Anonymous frontend list/search plugin. Search form (`piVars['search']['all']`, `['ref_ids']`, `['all_rule']`), pagination (`piVars['page']`), single view (`piVars['show_uid']`) are all reachable by any visitor. Editor/import/delete actions are gated behind `edit_mode` (`:195`), which requires a valid BE user or a whitelisted FE user **and** `editor.enabled`.
+
+---
+
+## Issue 1 — Only raw SQL in pi1 (`checkFEauthorRestriction`) → **FALSE POSITIVE (gated + not request-tainted)**
+
+The single raw SQL statement in the audited pi1 file (`:3087-3091`):
+
+```php
+$res = $this->getDatabaseConnection()->exec_SELECTquery(
+    'fe_user_id',
+    'tx_bib_domain_model_author as a, tx_bib_domain_model_authorships as m',
+    'a.uid = m.author_id AND m.pub_id = ' . $publicationId
+);
+```
+
+`$publicationId` is **not** request input: the only caller passes `$pub['uid']` (`:2353`), i.e. the integer `uid` of a publication row already fetched from the DB during list rendering. Additionally the whole block is doubly gated:
+- Reached only when `$editMode` is true (`:2352`), and `edit_mode` requires an authenticated BE user or whitelisted FE user (`:190-195`) — **not pre-auth**.
+- The query itself only runs when `conf['FE_edit_own_records'] != 0` (TS, `:3084`).
+
+**Verdict: FALSE POSITIVE.** Not pre-auth reachable and the interpolated value is a DB-sourced integer, not attacker input.
+
+---
+
+## Issue 2 — Anonymous search terms → SQL (`piVars['search']['all']`, `ref_ids`) → **hardened**
+
+Search input flows: `piVars['search']['all']` / `['ref_ids']` (`pi1:1209-1233`, `initializeSelectionFilter`) → `extConf['filters']` → `ReferenceReader` WHERE builder → `exec_SELECTquery`.
+
+Mitigations confirmed:
+- **`ref_ids`** (`pi1:1210-1211`): `GeneralUtility::intExplode(',', $ids)` → integer array. Safe.
+- **General search words** (`pi1:1220-1221`): `trimExplode` keeps them as raw strings, but every word hits SQL only through `fullQuoteStr`:
+  - `ReferenceReader.php:1140` `$word = $this->db->fullQuoteStr($word, ...)` then `... LIKE $word` (getFilterSearchFieldsClause).
+  - Author search `:529`, citeid `:665`/`:1021`, tag/keyword/author words `:1220` — all `fullQuoteStr`'d.
+- **Numeric filters** (years, uid, states, rule, types): `intval` / `implode_intval` (`pi1:945-1039`, `DbUtility.php:118,174,188`).
+- **`show_uid` single view** (`pi1:1379-1381`): `intval`. **`piVars['page']`** (`pi1:1481`): `Utility::crop_to_range(..., 0, max)` — numerically clamped before reaching the LIMIT clause.
+
+**Verdict: hardened.** All request-derived values reaching SQL are either integer-cast or `fullQuoteStr`-escaped.
+
+---
+
+## Issue 3 — ORDER BY built by raw concatenation → **FALSE POSITIVE (FlexForm-driven, not request)**
+
+`ReferenceReader.php:1368-1370` concatenates sort field + direction directly into `ORDER BY` (identifiers can't be `fullQuoteStr`'d — the classic unquotable sink):
+
+```php
+$orderClause[] = $filter['sorting'][$i]['field'] . ' ' . $filter['sorting'][$i]['dir'];
+```
+
+But `filters['sort']['sorting']` is populated (`pi1:1500-1563`, `initializeSortingFilter`) **only** from:
+- `extConf['sorting']` = `pi_getFFvalue(..., 'sorting', ...)` — plugin **FlexForm** (`pi1:346`), table-prefixed (`getReferenceTable().'.'.$sortField`), or
+- hard-coded field lists (`:1533-1563`), or
+- `date_sorting` FlexForm/TS (`:345,:400`).
+
+No `piVars`/`_GP` value reaches the sort field or direction. The sort configuration is set by the backend editor, not the anonymous visitor.
+
+**Verdict: FALSE POSITIVE.** ORDER BY is privileged FlexForm/TS config, not attacker-controllable.
+
+---
+
+## Issue 4 — Stored/reflected XSS
+The bib plugin renders publication data (editor-curated bibliography records) via marker substitution, not anonymous-submitted content. There is no anonymous write path to displayed data (create/edit is behind `edit_mode`, `:195`). No pre-auth stored-XSS surface comparable to a guestbook. Not a pre-auth finding.
+
+---
+
+## Summary
+
+| Issue | Verdict |
+|---|---|
+| Raw SQL `checkFEauthorRestriction` (`:3087`) | **FALSE POSITIVE** — behind `edit_mode` auth; `$publicationId` is a DB-sourced int |
+| Anonymous search terms → SQL | **hardened** — `intExplode` / `fullQuoteStr` throughout |
+| ORDER BY concatenation | **FALSE POSITIVE** — FlexForm/TS-driven, no request input |
+| Pre-auth stored XSS | Not present — no anonymous write path to rendered data |
+
 ### ubl_supportchat
 
 #### Security Audit — `ubl_supportchat` (Leipzig University Library "Support Chat")
@@ -4317,7 +4676,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 694 raw -> 631 after noise filter
+# 699 raw -> 636 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22

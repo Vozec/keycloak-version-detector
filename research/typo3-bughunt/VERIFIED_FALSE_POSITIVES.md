@@ -106,6 +106,11 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   gated by a single-use expiring `hash_hmac` verification code (parameterized lookup + HMAC
   recompute, `===`, empty rejected), emailed only to the admin. Hardened/FP.
 
+- **subugoe/bib 1.6.1 & ipf/bib 1.6.1** (byte-identical pi1) — anonymous search input reaches SQL
+  only via `intExplode`/`fullQuoteStr` (`ReferenceReader.php`), ORDER BY is FlexForm-driven (not
+  `piVars`), and the lone raw pi1 query (`:3087`) is `edit_mode`-auth-gated + integer-sourced.
+  No pre-auth SQLi/XSS. (The ve_guestbook stored XSS is confirmed separately.)
+
 ## Recurring FP shapes → generic query improvements to make (feeds codeql-php work)
 1. **Code-injection on dynamic dispatch must require the METHOD/CLASS NAME to be tainted**,
    not just an argument. A `'get'.ucfirst($x)` / `method_exists`-guarded / literal-`switch`
