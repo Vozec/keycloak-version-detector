@@ -6191,10 +6191,11 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 1208 raw -> 962 after noise filter
+# 1291 raw -> 1045 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [CRIT] Code injection       pixelant_pxa-pm-importer     Classes/Controller/Ajax/ProgressBarController.php:42
+[CRIT] Server-side request  wsr_myleaflet                Classes/Controller/AjaxController.php:158
 [XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22
 [XSS ] Reflected XSS        causal_routing               Classes/Controller/EidController.php:35
 [XSS ] Reflected XSS        dl_yag                       Classes/Controller/AjaxController.php:503
@@ -6232,5 +6233,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] Code injection       maikschneider_tca-api        Classes/Security/AccessController.php:26
 [CRIT] SQL injection        mia3_mia3_categories         Classes/Controller/CategoryController.php:48
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:207
-[CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:211
 ```

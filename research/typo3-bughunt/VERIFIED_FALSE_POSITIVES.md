@@ -187,6 +187,13 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
 - **maikschneider/tca-api 0.6.2** — `makeInstance($class)->$method(...)` where `[$class,$method]`
   is a build-time-validated developer-config checker tuple; request flows only as arguments.
 
+## Reflected-XSS flags where the "sink" is an HTTP redirect header, not an HTML body
+- **webentwicklerat/openid-connect 0.0.0 (v13.4)** — `AbstractRedirect` middleware emits only
+  `RedirectResponse($originalRedirectUri)` (`:76`) — a `Location` header, no `echo`/HTML anywhere,
+  so `tx_openidconnect_redirecturi` is not an XSS sink. Open-redirect is separately gated by
+  `OpenidConnectUtility::isTrustedRedirectUrl($originalRedirectUri)` (`:70`). Pre-auth (OIDC flow)
+  but no reflected-XSS primitive. FP.
+
 ## Reflected-XSS flags killed by response Content-Type / unwired library entry
 - **jvelletti/jvchat 13.4.1** — the reflected sinks are FP: `Chat.php:689` is a JSONP
   `callback` echo under `application/json`; `:980` is an `application/xml` `<![CDATA[]]>`

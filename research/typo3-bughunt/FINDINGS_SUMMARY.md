@@ -19,7 +19,9 @@ part of the deliverable (it says *why* the maintained ecosystem mostly holds).
   (SQLi, Code-inj, Command-inj, Unsafe-deser, File-inclusion, SSRF, Path-traversal,
   Reflected-XSS, XXE), with a **strict intra-extension source filter** (a finding is kept
   only when *every* taint source is inside the sink's own extension — kills the
-  cross-extension false flows a mixed DB produces). **~1150+ candidates** over 134 batches.
+  cross-extension false flows a mixed DB produces). **~1290 candidates** over 132/134 batches
+  (~99%; batch 034 excluded — one oversized extension repeatedly exceeded the 15-min per-batch
+  CodeQL timeout and was skipped rather than block the run).
 - Run with the **generic codeql-php precision fixes** from `../codeql-php-audit/`
   (name-arity call-resolution gate + numeric-cast sanitizer) — the fix that made whole-app
   PrestaShop analysis finish at all, recall unchanged at bench 183/232.
