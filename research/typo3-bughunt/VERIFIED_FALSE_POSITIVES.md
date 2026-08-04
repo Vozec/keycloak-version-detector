@@ -111,6 +111,19 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   `piVars`), and the lone raw pi1 query (`:3087`) is `edit_mode`-auth-gated + integer-sourced.
   No pre-auth SQLi/XSS. (The ve_guestbook stored XSS is confirmed separately.)
 
+## Path-traversal / upload FPs — separator-stripping sanitizer or resolve-then-check confinement
+- **felixnagel/pluploadfe 9.0.3-dev (TYPO3 14.2)** — FE upload middleware, but the request
+  filename (`$_REQUEST['name']`/`$_FILES['file']['name']`) is `preg_replace('#[^\w\._]+#','_')`'d
+  (`Upload.php:273`) — every `/`,`\`,NUL → `_`, so no separator survives to
+  `fopen`/`rename`/`unlink($filePath)` (`:326/353/371`); `upload_path` is FAL-validated under the
+  public path. RCE additionally needs admin misconfig AND is blocked by core `fileDenyPattern`
+  (`FileNameValidator`). No traversal, no default-config RCE.
+- **maispace/mai-assets 1.0.0** — `StaticFileServeMiddleware.php:119`
+  `file_get_contents($filePath)` where the URI-derived path goes through
+  `GeneralUtility::resolveBackPath` (collapses `../` textually) **before** the
+  `str_starts_with($baseDir)` guard (applied twice), and the resolved name is always the
+  hardcoded `/index.html`. `../` escapes throw → null → pass-through. Arbitrary read not achievable.
+
 ## "SQLi" sinks that are actually search-engine (Solr/Elasticsearch) queries
 - **kitodo/presentation (dlf) 7.0.1** — `SearchInDocument.php:152` / `SearchSuggest.php:64`
   `$query->setQuery(...)` are **Solarium/Apache-Solr** query objects (`Solr.php:581`
@@ -135,6 +148,19 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   but `$orderBy`/`$direction` come from the content element's **FlexForm** (`pi_getFFvalue`),
   fixed `selectSingle` allow-lists (name/image/crdate/…, ASC/DESC) — editor config, not request.
   `pointer` is `(int)`-cast. Anonymous FE plugin, but the injectable inputs aren't request-reachable.
+
+## More dynamic-dispatch FPs — eID/middleware dispatchers bounded to whitelisted callables
+- **stmllr/zahnstocher** — eID `Dispatcher.php:61` `$class::$method` from `_GP`, but both are
+  `^[a-zA-Z]+$`-filtered, class prefix hardcoded `Stmllr\Zahnstocher\Controller\` behind
+  `class_exists`, method `$name.'Action'` behind `method_exists`; only `MailboxController` exists
+  (no-arg helpers). Not RCE. (Minor pre-auth mailbox flush, out of scope.)
+- **site/site-core** — `AjaxMiddleware.php:79` `makeInstance($cfg['target'])` where target is a
+  developer-registered class from `$GLOBALS[...]['site_core']['AJAX']`; `vendor`/`ajax` params only
+  *select* a registered entry. (Secondary: wildcard-branch `$method` lacks `method_exists` — method
+  selection on an already-whitelisted instance, needs a `*` config; not RCE.) `@deprecated`.
+- **skynettechnologies/allinoneaccessibility 14.0.1** — `AwesomeMiddleware.php` curl target is the
+  hardcoded `https://ada.skynettechnologies.us/api/widget-settings`; attacker `HTTP_HOST` only
+  fills the POST body `website_url`, never host/scheme. No request-controlled fetch URL. FP for SSRF.
 
 ## More dynamic-dispatch / assert FPs (argument-only or non-sink)
 - **madj2k/t3-cat-search 13.4.1** — `$search->$setter($value)` (`AbstractSearchController.php:271`),

@@ -3231,6 +3231,114 @@ public function showAction(Item $orderItem): ResponseInterface {
 
 Sources: [extcode/cart GitHub](https://github.com/extcode/cart), [TYPO3 Security Advisories](https://typo3.org/help/security-advisories)
 
+### felixnagel_pluploadfe
+
+#### felixnagel/pluploadfe — `Classes/Middleware/Upload.php`
+
+## Verdict: FALSE POSITIVE (path traversal) / NEEDS-CONFIG (arbitrary-upload → RCE, and even then blocked by TYPO3 fileDenyPattern)
+
+The reported path-traversal at lines 326/336/353/371 does **not** survive: the only
+attacker-controlled path component is the filename, and `getFileName()` strips every
+directory separator before it reaches the sink. RCE via a dangerous extension is
+gated by an admin allow-list **and** TYPO3's `FileNameValidator` (fileDenyPattern).
+
+---
+
+## 1. Sinks and the path argument
+
+`$filePath` is built once at **line 323**:
+```php
+$filePath = $this->uploadPath . DIRECTORY_SEPARATOR . $this->getFileName();
+```
+and flows into the filesystem ops:
+- **326** `@fopen(sprintf('%s.part',$filePath), 'ab'|'wb')` — write (create temp part)
+- **336** `@fopen($_FILES['file']['tmp_name'],'rb')` — read (the uploaded temp, PHP-controlled, not the target)
+- **353** `rename($filePath.'.part', $filePath)` — final write/move
+- **371** `@unlink($filePath)` — delete (only a file this request just created)
+
+The tainted path component is `getFileName()`; `uploadPath` is the second component.
+
+## 2. Backward taint trace + confinement
+
+**Filename source → sink**
+```
+Upload.php:267-268  $filename = $_REQUEST['name']          // attacker input
+Upload.php:270      $filename = $_FILES['file']['name']    // attacker input (fallback)
+Upload.php:273      return preg_replace('#[^\w\._]+#', '_', $filename)   // SANITIZER
+Upload.php:323      $filePath = $this->uploadPath . '/' . $this->getFileName()
+Upload.php:326/353/371  fopen / rename / unlink($filePath)
+```
+`preg_replace('#[^\w\._]+#','_', ...)` keeps only `[A-Za-z0-9_]` + literal `.`.
+Every `/`, `\`, and NUL is replaced with `_`. `../../etc/passwd` becomes
+`.._.._etc_passwd`. **No directory separator can survive**, so the filename cannot
+traverse or contain an absolute path. Path traversal via filename is dead.
+
+**Destination dir (`uploadPath`) source** — all non-request or sanitized:
+```
+Upload.php:160  getUploadDir($config['upload_path'], getUserDirectory(), $config['obscure_dir'])
+  - config['upload_path']  : DB config record (admin), FAL-resolved (line 250-252),
+                             validated by Filesystem::isPathValid → GeneralUtility::isAllowedAbsPath
+                             under Environment::getPublicPath() (Filesystem.php:31, checkUploadConfig:223)
+  - getUserDirectory()     : FE-user DB record fields, sanitized preg_replace('#[^0-9a-zA-Z\-\.]#','_')
+                             (line 214) — from the user's own record, no '/' possible
+  - obscure_dir            : Filesystem::getRandomDirName() (random_int)
+  - chunk_path (line 282)  : read from server-written FE session, not request
+```
+None of the destination components accept a request-supplied slash. Traversal killed.
+
+## 3. pluploadfe-specific checks
+- **(a) Auth gate:** anonymous is *possible*. `process()` fires whenever `tx_pluploadfe`
+  (query or body) is present (line 56) and method is POST. A valid, non-hidden, in-window
+  `tx_pluploadfe_config` record must exist (getUploadConfig:231-241). Per-config
+  `feuser_required` (line 149) decides whether a FE user session is needed — if `0`, upload
+  is fully anonymous; if `1`, a valid FE login is required.
+- **(b) Dangerous filename:** `getFileName()` preserves dots, so `evil.php` is a *lexically*
+  valid stored name. But `FileValidation::checkFileExtension()` (line 157) enforces (i) the
+  admin `extensions` CSV allow-list, **and** (ii) `FileNameValidator->isValid()` — TYPO3's
+  core `fileDenyPattern`, which by default rejects `.php`, `.phtml`, `.phar`, etc. even if an
+  admin adds `php` to the allow-list. Chunk assembly (`chunk`/`chunks`, lines 154/319-320)
+  only casts to `(int)` and the target path still uses the same sanitized `getFileName()`
+  (line 283) + session-stored `chunk_path` — no traversal is introduced.
+- **(c) Destination dir:** `{public}/{config.upload_path}[/{userDir}][/{randomDir}]`, always
+  confined under `Environment::getPublicPath()` via `isAllowedAbsPath`.
+
+## 4. Reachability / auth level
+Registered in `Configuration/RequestMiddlewares.php` under `frontend`, `after
+typo3/cms-frontend/authentication`. In the FE PSR-15 stack, reachable **pre-auth** when the
+matching config record has `feuser_required = 0`. Trigger: `POST` with `tx_pluploadfe=<uid>`.
+
+## 5. Version / compat
+`ext_emconf.php`: version **9.0.3-dev**, requires PHP 8.2–8.4, **TYPO3 14.2.0–14.3.99**.
+
+---
+
+## Why not CONFIRMED
+- Path traversal (the reported finding): the filename sanitizer at `Upload.php:273` removes
+  all `/`, `\`, NUL — no separator reaches lines 326/336/353/371. **FALSE POSITIVE.**
+- Arbitrary write / RCE: destination confined under public path; dangerous extensions blocked
+  by admin allow-list **and** core `FileNameValidator`/`fileDenyPattern`. Would require an
+  admin to both allow an executable extension and weaken the global fileDenyPattern —
+  a misconfiguration, not a middleware traversal bug. **NEEDS-CONFIG, strongly mitigated.**
+
+## Representative request (does NOT escape)
+```
+POST /?tx_pluploadfe=1 HTTP/1.1
+Host: victim
+Content-Type: multipart/form-data; boundary=X
+
+--X
+Content-Disposition: form-data; name="name"
+
+../../../../var/www/html/shell.php
+--X
+Content-Disposition: form-data; name="file"; filename="x"
+
+<?php system($_GET['c']); ?>
+--X--
+```
+Stored filename becomes `.._.._.._.._var_www_html_shell.php` inside the configured upload dir
+(no traversal); and `checkFileExtension` rejects `.php` via fileDenyPattern before any write.
+
 ### friendsoftypo3_tt-address
 
 #### Security Audit — friendsoftypo3/tt_address
@@ -4532,6 +4640,58 @@ an authenticated, privileged backend action, not a pre-auth frontend SQLi.
 Real ORDER BY concatenation, but **config/DB-sourced via FlexForm** and
 allowlist-constrained. **Not a pre-auth SQL injection.**
 
+### kitodo_kitodo_presentation
+
+#### kitodo_presentation — SearchInDocument / SearchSuggest
+
+**Extension:** Kitodo.Presentation (`dlf`) v7.0.1 — TYPO3 `12.4.0-13.4.99`
+**Files:** `Classes/Middleware/SearchInDocument.php:152`, `Classes/Middleware/SearchSuggest.php:64`
+
+## Verdict: FALSE POSITIVE for SQLi — the sink is an Apache Solr (Solarium) query, not DB SQL. At most **search-query injection** (low impact).
+
+Both CodeQL "SQL injection" alerts land on `$query->setQuery(...)` calls against **Solarium query objects**, i.e. Apache Solr query strings. Confirmed:
+
+- `Classes/Common/Solr/Solr.php:19` `use Solarium\Client;`
+- `Solr.php:115` `protected Client $service;` (Solarium\Client = Apache Solr client)
+- `Solr.php:581` `$this->service = GeneralUtility::makeInstance(Client::class, ...)`
+- `SearchInDocument.php:150` `$this->solr->service->createSelect()` → Solarium select query
+- `SearchInDocument.php:152` `$query->setQuery($this->getQuery($parameters))` — sets the **Solr query string**
+- `SearchSuggest.php:63-64` `$solr->service->createSuggester(); $query->setQuery(...)` — Solr suggester query
+
+No `QueryBuilder`, no `->where($raw)`, no `exec_SELECT*`, no PDO/`->query()`. The value never reaches a relational database. A "SQL injection" classification is incorrect. The relevant (much lower) risk is Solr query-syntax injection.
+
+### SearchInDocument.php:152 — tainted chain
+- `SearchInDocument.php:66` `$parameters = (array) $request->getParsedBody();` (POST body, taint source)
+- `:89` `$this->executeSolrQuery($parameters)`
+- `:152` `$query->setQuery($this->getQuery($parameters))`
+- `:184-187` `getQuery()` builds:
+  `fulltext:(' . Solr::escapeQuery((string)$parameters['q']) . ') AND uid:' . getUid($parameters['uid'])`
+  - `$parameters['q']` → `Solr::escapeQuery()` (`Solr.php:181`) escapes `{ } [ ] : / \` — blocks Solr field/range operators. Sanitized against Solr-syntax abuse.
+  - `$parameters['uid']` → `getUid()` (`:199-202`): `is_numeric ? (int) : $uid`. **A non-numeric `uid` is passed through unescaped into the Solr query string.** This is a genuine but limited **Solr query injection** (attacker can alter the Solr query for the `uid` clause, e.g. inject `*:*`), scoped to read access on the Solr fulltext index — not the SQL DB.
+
+### SearchSuggest.php:64 — tainted chain
+- `SearchSuggest.php:48` `$parameters = (array) $request->getParsedBody();`
+- `:57` HMAC gate: `hash_equals(GeneralUtility::hmac((string)(new Typo3Version()).Environment::getExtensionsPath(), 'SearchSuggest'), $uHash)` — `GeneralUtility::hmac` keys on the site **encryptionKey** (secret). Request must carry a valid `uHash`, so this endpoint is **effectively gated by a server secret** and not freely forgeable.
+- `:64` `$query->setQuery(Solr::escapeQuery((string)$parameters['q']))` — `q` is escaped; Solr suggester query. No injectable path of note.
+
+## Reachability / auth
+- Registered in `Configuration/RequestMiddlewares.php` under `frontend`, `after: typo3/cms-frontend/prepare-tsfe-rendering`. Runs in the **frontend PSR-15 stack, unauthenticated**.
+- Activation: **SearchInDocument** requires POST body `middleware=dlf/search-in-document` (`:68`) + non-empty `encrypted` (a `Helper::decrypt`-able Solr core name). No login required → pre-auth reachable, but sink is Solr not SQL.
+- **SearchSuggest** requires `middleware=dlf/search-suggest` + a valid `uHash` HMAC (encryptionKey-derived) → not truly anonymous.
+
+## Trigger (SearchInDocument, the pre-auth Solr-injection vector)
+```
+POST /?type=0 HTTP/1.1
+Host: victim
+Content-Type: application/x-www-form-urlencoded
+
+middleware=dlf/search-in-document&encrypted=<valid-encrypted-core>&pid=<pid>&uid=*:*&q=test&start=0
+```
+`encrypted` must be a valid `Helper::decrypt` core token (encryptionKey-dependent), which limits practical exploitation. Impact if reached: manipulation of the Solr query (index read), **not** SQL DB compromise.
+
+## Bottom line
+Not SQL injection. Rate as low-severity **Solr search-query injection** on the unescaped `uid` in `SearchInDocument::getQuery`; `q` is escaped in both middlewares; `SearchSuggest` is additionally HMAC-gated.
+
 ### kohlercode_slug
 
 #### kohlercode_slug — SQL injection audit (Target A)
@@ -4654,6 +4814,206 @@ Not applicable — no attacker-controlled bytes reach the sink, so no gadget ana
 - fl_realurl_image **6.0.1** (state: stable), `ext_emconf.php`.
 - TYPO3 constraint: `typo3 => 12.4.0-12.4.99`, `php => 8.3.0+`.
 
+### madj2k_t3-cat-search
+
+#### madj2k / t3-cat-search — AbstractSearchController dynamic setter
+
+**Verdict: FALSE POSITIVE (not code injection / not RCE)**
+
+## Sink
+`Classes/Controller/AbstractSearchController.php:271` & `:273`
+```php
+$search->$setter((int)$value);   // 271
+$search->$setter($value);        // 273
+```
+Dynamic method call `$obj->$m(...)` on a fixed object.
+
+## Identity-source chain
+- `searchRelatedAction()` reads request input:
+  - `:258` `$queryParams = $this->request->getQueryParams();`
+  - `:263` `$params = $queryParams['tx_catsearch_search']['search'];`
+  - `:266` `foreach ($params as $param => $value)`
+  - `:268` `$setter = 'set' . ucfirst((string) $param);`
+- **Guard at `:269`** `if (method_exists($search, $setter))` — the method is invoked only if it already exists on `$search`.
+- `$search` is `GeneralUtility::makeInstance(Search::class)` (`:264`) — a `final` DTO (`Classes/Domain/DTO/Search.php:28`).
+
+The callable identity is therefore constrained to the pre-existing `set*` methods of the `Search` DTO (`setTextQuery`, `setYear`, `setFilter1..5`, `setMultiSelectFilter1..5`, `setSorting`, `setLayout`, `setCurrentPage`, …), each a typed setter taking a single scalar/array argument. The attacker controls only the **argument**, never an arbitrary callable/class/path. This is a mass-assignment pattern over a transient search-filter DTO, not code execution. No `call_user_func` to an attacker-named target, no `new $cls`, no variable function.
+
+Worst case is setting an unintended search property (e.g. `setLayout`) on an object that lives only for the duration of the request and only feeds a repository query — no privilege or state impact.
+
+## Reachability / auth
+Extbase plugin action on a public page; frontend search is anonymous. Reachable pre-auth — but there is nothing to exploit.
+
+## Version
+CatSearch **13.4.1**, TYPO3 `13.4.0–13.4.99`.
+
+### maikschneider_tca-api
+
+#### maikschneider / tca-api — AccessController callable dispatch
+
+**Verdict: FALSE POSITIVE (callable identity is developer config, not request input)**
+
+## Sink
+`Classes/Security/AccessController.php:26`
+```php
+[$class, $method] = $requiredRole;
+return (bool)GeneralUtility::makeInstance($class)->$method($request, $record);
+```
+`new $cls` (via `makeInstance`) + dynamic method `$obj->$method(...)`.
+
+## Identity-source chain (config, not request)
+`$requiredRole` is passed in by the dispatcher, sourced from the extension's TCA-API definition:
+- `Classes/Dispatcher/RequestDispatcher.php:241` `$requiredRole = $config->securityRole($operation);`
+- `Classes/Dispatcher/RequestDispatcher.php:242` `$this->accessController->isAllowed($requiredRole, $request, $existingRecord, $config)`
+- `Classes/Configuration/ApiDefinition.php:82` `securityRole()` returns `$this->security[$operation]` (defaulting to `AccessRole::PUBLIC` for reads / `AccessRole::DISABLED` for writes).
+- `ApiDefinition.php:303-322` validates each `security[...]` entry at build time: it must be an `AccessRole` enum, an `[AccessRole, groupIds]` tuple, or a `[class-string, method-string]` callable tuple — all authored in the developer's TCA/API configuration.
+
+The `[$class, $method]` branch (`:20-26`) is only entered when `$requiredRole[0]` is **not** an `AccessRole` (`:21`), i.e. a developer-declared `[MyChecker::class, 'method']` custom access checker. `$request` and `$record` flow only as **arguments** to that fixed, config-named callable. No request parameter (`getQueryParams`/`getParsedBody`/etc.) reaches `$class` or `$method`. Standard extensible access-policy pattern — not injection.
+
+## Reachability / auth
+Invoked on the public FE API dispatch path (`RequestDispatcher`), but since the callable identity is static configuration there is nothing an anonymous request can redirect.
+
+## Version
+TCA API **0.6.2** (state: beta), TYPO3 `13.4.0–14.99.99`, requires `frontend`.
+
+### maispace_assets
+
+#### maispace/mai-assets — `Classes/Middleware/StaticFileServeMiddleware.php`
+
+## Verdict: FALSE POSITIVE (arbitrary file read is confined)
+
+The reported traversal at line 119 (`file_get_contents($filePath)`) is blocked by the
+combination of: (a) `GeneralUtility::resolveBackPath()` textual `../` collapse **before**
+the prefix check, (b) a `str_starts_with($path, $baseDir)` guard applied **twice**, and
+(c) a hard-coded `/index.html` suffix on every resolved path — an attacker cannot name an
+arbitrary target file even in a hypothetical prefix bypass.
+
+---
+
+## 1. Sink and the path argument
+```php
+StaticFileServeMiddleware.php:119   $content = file_get_contents($filePath);   // READ
+```
+`$filePath` comes from `resolveCacheFilePath()` (line 100) and is post-processed by
+`resolveContentEncoding()` (line 113), which only ever appends `.br` / `.gz`.
+
+## 2. Backward taint trace + confinement
+```
+:83   $requestUri = (string)$request->getUri();          // attacker-influenced path
+:100  $filePath = resolveCacheFilePath($pageUid,$languageUid,$requestUri)
+:162  resolveCacheFilePath:
+        primary : getPageDirectoryById((int)$pageUid,(int)$languageUid)  // ints only — no taint
+        fallback: getPageDirectory($requestUri)                          // uses URL path
+      then guard: str_starts_with($filePath, $baseDir)   (:171 and :184)
+:119  file_get_contents($filePath)
+```
+
+**Fallback path — `StaticFileCacheDirectory::getPageDirectory()`:**
+```
+buildRelativePagePath: {scheme}_{host}_{port}/{ trim(parse_url(uri)['path'],'/') }/
+resultPath = GeneralUtility::resolveBackPath($baseDir . $relative)   // collapses ../ TEXTUALLY
+if (!str_starts_with($resultPath, $baseDir)) throw InvalidArgumentException  // guard AFTER resolution
+```
+`resolveBackPath` resolves `xxx/../` sequences first, and only then is the prefix compared
+against `$baseDir` (itself `resolveBackPath`-normalized, ending in `/`). A payload such as
+`/../../../../etc/passwd` collapses to a path that no longer starts with `$baseDir`, so
+`getPageDirectory` throws → caught in `resolveCacheFilePath` → returns `null` → middleware
+falls through (`handler->handle`). This is the correct order (resolve-then-check), not the
+broken check-then-use pattern.
+
+**Primary path** uses `(int)$pageUid` / `(int)$languageUid` only → `{base}/{int}_{int}/` — no
+string taint at all.
+
+**Filename is fixed:** every resolved path ends in `/index.html`
+(`StaticHtmlWriterService::INDEX_FILENAME`, lines 170/183), with at most a `.br`/`.gz`
+suffix. Even if a prefix-collision bypass of `str_starts_with` were constructed, the read is
+constrained to a file literally named `index.html[.br|.gz]` — `/etc/passwd` and friends are
+unreachable.
+
+`isValidUri` (line 180 / StaticFileCacheDirectory) additionally requires a full absolute URL
+with scheme + host + path via `GeneralUtility::isValidUrl`, and the host segment is the
+server's own host, not an arbitrary attacker string.
+
+## 3. Reachability / auth level
+`Configuration/RequestMiddlewares.php` → `frontend` stack, `after
+maispace/mai-assets/early-hints`. **Pre-auth** (no session gate). Guarded by:
+- `isEnableStaticFileCache()` extension config must be on (else pass-through, line 68) —
+  so exploitation would even require the feature enabled (**NEEDS-CONFIG** just to reach the
+  sink), and
+- `GET` only, no query string (lines 72/86).
+
+Even fully enabled and unauthenticated, the traversal is confined as shown above.
+
+## 4. Version / compat
+`ext_emconf.php`: version **1.0.0**, requires **TYPO3 12.4.0–14.99.99**.
+
+---
+
+## Why not CONFIRMED
+- `resolveBackPath()` normalizes `../` **before** the `str_starts_with($baseDir)` guard
+  (StaticFileCacheDirectory: getPageDirectory / getPageDirectoryById), and the guard is
+  repeated in the middleware (lines 171, 184).
+- The target filename is hard-coded `/index.html` (+`.br`/`.gz`), so no arbitrary filename
+  can be read even if the directory prefix check were somehow defeated.
+- Primary lookup is integer-only; fallback host segment is server-controlled.
+- Fail-open `catch (\Throwable)` (line 122) turns any resolution failure into a harmless
+  pass-through, not a leak.
+
+## Representative request (does NOT escape)
+```
+GET /../../../../etc/passwd HTTP/1.1
+Host: victim
+Accept-Encoding: identity
+```
+`resolveBackPath` collapses the `../` to a path outside `$baseDir`; the guard throws;
+`resolveCacheFilePath` returns `null`; the middleware delegates to normal TYPO3 rendering.
+No arbitrary read.
+
+### maispace_mai-faq
+
+#### maispace_mai-faq — FaqApiMiddleware
+
+**Extension:** Mai Faq v1.0.0 — TYPO3 `13.4.0-14.99.99`
+**File:** `Classes/Middleware/FaqApiMiddleware.php:140`
+
+## Verdict: FALSE POSITIVE
+
+Line 140 is `->orderBy('f.' . $sort, $order);` — string concatenation into an ORDER BY, which is why CodeQL flagged it. But **both concatenated values are strictly whitelisted**, so no request-controlled data reaches the SQL.
+
+### Tainted chain and why it is neutralized
+- `:120` `$params = $queryParams ?? $request->getQueryParams();` (GET params, taint source)
+- `:123` `$sort = $this->resolveSortField($params['sort'] ?? 'sorting');`
+  - `resolveSortField()` (`:275-280`): `strtolower(trim($field))` then `in_array($field, ['sorting','question','uid'], true) ? $field : 'sorting'`. **Strict whitelist**; anything else collapses to `'sorting'`. The value concatenated at `:140` can only ever be one of three hardcoded column names.
+- `:124` `$order = $this->resolveSortOrder($params['order'] ?? 'asc');`
+  - `resolveSortOrder()` (`:286-289`): returns literal `'DESC'` or `'ASC'` only. Not attacker-controlled.
+- `:140` `->orderBy('f.' . $sort, $order)` — both operands are safe constants. **No injection.**
+
+### Every other input is parameterized
+- `:121` `categoryUid` → `(int)` cast, then `createNamedParameter(..., Connection::PARAM_INT)` at `:349`.
+- `:122-129` `pageUids` → `explode` + `array_map('intval')` + `>0` filter, then `createNamedParameter(..., Connection::PARAM_INT_ARRAY)` at `:144`.
+- `:137-138` hidden/deleted → `expr()->eq('f.hidden', 0)` constants.
+- `addLanguageConstraint` (`:307-326`) → `createNamedParameter(... PARAM_INT_ARRAY / PARAM_INT)`.
+- `addCategoryJoin` (`:331-353`) → all values via `createNamedParameter`.
+- `handleCategories` (`:189-226`): `categoryUids` → `intval` + `>0` filter → `createNamedParameter(... PARAM_INT_ARRAY)` at `:212`.
+- `attachCategoryData` (`:361-406`): uids from prior int-cast rows → `createNamedParameter(... PARAM_INT_ARRAY)`.
+
+No `->where($rawString)`, no `->add('where', ...)`, no `exec_SELECT*`, no string-concatenated WHERE/LIKE. The only concatenation (ORDER BY) uses whitelisted tokens. `createNamedParameter` / int-casts neutralize all user input.
+
+## Reachability / auth
+- Registered in `Configuration/RequestMiddlewares.php` under `frontend`, `after: typo3/cms-frontend/site`. **Unauthenticated frontend PSR-15 middleware.**
+- `AbstractApiMiddleware::process` (`maispace_base/.../AbstractApiMiddleware.php:25-38`) — no auth/login/token check; calls `handle()` when `shouldHandle()` is true.
+- Activation: `shouldHandle()` (`:75-78`) matches any request path starting with `/api/faq`. So the endpoint IS pre-auth reachable — but there is **no injectable sink**, so reachability does not create a vulnerability.
+
+## Trigger (for completeness — returns data, no injection)
+```
+GET /api/faq/items?sort=question&order=desc&categoryUid=1&pageUids=1,2 HTTP/1.1
+Host: victim
+```
+Attempting `sort=uid;DROP...` or `order=asc--` is discarded by the whitelist/normalizer (`sort` falls back to `sorting`, `order` falls back to `ASC`).
+
+## Bottom line
+Pre-auth reachable but not exploitable. The ORDER BY concatenation is guarded by a strict column whitelist and a DESC/ASC normalizer; all other inputs are int-cast and bound via `createNamedParameter`. **No SQL injection.**
+
 ### oliverklee_realty
 
 #### Security Audit — oliverklee/realty (Realty Manager) v3.0.2
@@ -4733,6 +5093,30 @@ None. `GET /index.php?eID=realty&city=1%20OR%201=1&type=withNumber` is evaluated
 No dedicated public advisory (TYPO3-EXT-SA / GHSA / CVE) was found for `realty` / `oliverklee/realty` at v3.0.2 concerning this eID. (Oliver Klee has issued advisories for other extensions, e.g. TYPO3-EXT-SA-2022-006 for `seminars`, but none applicable here.) The raw-WHERE concatenation in `findAllByCityUid` should still be hardened defensively (`intval`/quoting) in case another caller ever passes untrusted input.
 
 **Sources:** [TYPO3 Security Advisories](https://typo3.org/help/security-advisories), [oliverklee/ext-realty (GitHub)](https://github.com/oliverklee/ext-realty)
+
+### oliverklee_seminars
+
+#### oliverklee / seminars — DefaultController & RegistrationManager
+
+**Verdict: FALSE POSITIVE (no code-injection sink at any cited line)**
+
+None of the flagged lines contain a dynamic callable/class/include/eval/unserialize sink. Each is either a type `\assert()` on an object instance or a constant callable.
+
+## Cited lines
+- `Classes/FrontEnd/DefaultController.php:385` — `\assert($event instanceof LegacyEvent);` — boolean type assertion, **not** a string `assert('code')`. No eval.
+- `:598` — `\assert($this->seminar instanceof LegacyEvent);` — same.
+- `:1413` — `\assert($this->seminar instanceof LegacyEvent);` — same.
+- `:1777` — `array_map([$this, 'pi_getClassName'], $classes);` — a **constant** callable `[$this, 'pi_getClassName']` (literal method name). Attacker controls neither the callable nor the class; only array *values* (CSS-class strings) flow as arguments to a fixed method. Not injection.
+- `:1917` — `\assert($this->cObj instanceof ContentObjectRenderer);` — boolean type assertion.
+- `Classes/Service/RegistrationManager.php:206` — `\assert($contentObject instanceof ContentObjectRenderer);` — boolean type assertion.
+
+The `assert()` calls receive boolean expressions, so even with `zend.assertions`/`assert.active` enabled there is no string-eval path (string-eval only occurred for `assert('literal-code-string')`, which is not used here). These are almost certainly line numbers a naive scanner mapped to "eval-like `assert`" and "`call_user_func`-like `array_map`".
+
+## Reachability / auth
+`DefaultController` renders on the public FE (anonymous), but there is no controllable sink, so reachability is moot.
+
+## Version
+Seminar Manager **6.0.x-dev**, TYPO3 `11.5.41–12.4.99`, PHP `7.4–8.4`.
 
 ### phorax_formhandler
 
@@ -4856,6 +5240,41 @@ No request parameter selects a different user's uid; widget keys/values (`$_REQU
 | SQLi | FALSE POSITIVE (`intval` on own be_user uid) |
 | Unrestricted upload | NOT PRESENT (no upload code) |
 | IDOR by uid | FALSE POSITIVE (all ops bound to acting BE user's own uid) |
+
+### pixelant_pxa-pm-importer
+
+#### pixelant / pxa-pm-importer — ProgressBarController dynamic dispatch
+
+**Verdict: FALSE POSITIVE for RCE (bounded method dispatch on a fixed class; backend-authenticated route)**
+
+## Sink
+`Classes/Controller/Ajax/ProgressBarController.php:42`
+```php
+$action = $request->getParsedBody()['action'] ?? 'getStatus';   // :40
+return $this->{$action}($request);                              // :42
+```
+Dynamic method call `$this->$action(...)`. The **method name is fully request-controlled** (POST body `action`).
+
+## Why not RCE
+`$this` is a concrete `ProgressBarController` instance that `extends` nothing. The dispatch can only resolve to methods defined on that class: `importProgressDispatcher`, `getStatus`, `close`, `__construct` (plus PHP magic none of which exist here). There is no `new $cls`, no `call_user_func` to an attacker-named class, no way to reach an arbitrary function. The callable identity is bounded to this one fixed object's own methods, all of which take a single `$request` argument.
+
+Worst realistic case: invoking `close` (deletes a progress row by `uid`) or re-invoking the dispatcher — an authorization/logic smell, not code execution. So it is **not** code injection in the RCE sense.
+
+## Reachability / auth
+Registered as a **backend** AJAX route:
+`Configuration/Backend/AjaxRoutes.php`
+```php
+'pxapmimporter-progress-bar' => [
+    'path' => '/pxapmimporter/progress-bar-status',
+    'target' => ProgressBarController::class . '::importProgressDispatcher',
+];
+```
+Backend AjaxRoutes are served under the TYPO3 backend entry point and require a valid **`be_user`** session (no `'access' => 'public'` flag is set). Not reachable by an anonymous FE visitor. Full route: `/typo3/ajax/pxapmimporter-progress-bar`.
+
+## Version
+pxa_pm_importer **2.0.1**, TYPO3 `9.5.0–9.5.99`, depends `pxa_product_manager 9.5.1–9.99.99`.
+
+**Note:** authenticated-BE-user method-name injection over a 4-method class is low severity, but the pattern should still be replaced with an explicit whitelist/`switch`.
 
 ### ribase_sr-sendcard
 
@@ -5004,6 +5423,70 @@ None of the concatenated parts derive from anonymous request input:
 | Raw SQL in `displayList` (ORDER BY / WHERE / LIMIT) | **FALSE POSITIVE** — all SQL-concatenated values are FlexForm/TS-derived or numerically coerced |
 | SQLi on INSERT (submit path) | Not vulnerable — `exec_INSERTquery` is DBAL-quoted |
 
+### site_site-core
+
+#### B — site/site-core — AjaxMiddleware
+
+**Verdict: FALSE POSITIVE** (instantiated class is a whitelisted config value, not request-controlled)
+
+## Sink
+`Classes/Http/Middleware/AjaxMiddleware.php:79` — `$classInstance = GeneralUtility::makeInstance($thisAjaxCfg['target'], ...)`
+(the CodeQL "code injection" sink; line 84 `$classInstance->{$method}(...)` is the method call.)
+
+## Analysis — class identity is NOT attacker-controlled
+Request input only *selects* which registered config entry is used; it never supplies the class name:
+
+- `AjaxMiddleware.php:49` `$queryParams = $request->getQueryParams()`
+- `AjaxMiddleware.php:54` `$ajaxId = $queryParams['vendor'].'/'.$queryParams['ajax']`
+- `AjaxMiddleware.php:60` `$ajaxConfigIdentifiers = ...AjaxService::findAll()` → returns `$GLOBALS['TYPO3_CONF_VARS']['EXTCONF']['site_core']['AJAX']`, populated only by server-side `AjaxService::register()` calls (`Classes/Service/AjaxService.php:24`).
+- The `vendor`/`ajax` params match against config **keys**; the resulting `$thisAjaxCfg['target']` is the developer-registered class-name **value**. An attacker can pick among registered targets but cannot inject a new class string.
+
+Therefore the `makeInstance()` target at line 79 is confined to the whitelist of registered AJAX handlers → not code injection.
+
+## Secondary (lower severity, bounded) — dynamic method at line 84
+`$method` can become request-controlled in the wildcard branch:
+- `AjaxMiddleware.php:69` `$method = explode('-', $queryParams['ajax'])[1]` (only when a config key `vendor/Name-*` matches), with **no `method_exists()` guard**.
+This allows calling an arbitrary *method name* on an already-whitelisted handler instance. It is method-injection on a fixed class, not arbitrary-code execution, and requires a matching wildcard AJAX config to be registered. Worth hardening (add a `method_exists`/allow-list) but not the reported code-injection RCE.
+
+## Reachability
+Frontend middleware `site-core/ajax` (`Configuration/RequestMiddlewares.php`), ordered `after typo3/cms-frontend/authentication` — runs for every request, no login required (pre-auth). Activation: request URI starts with `/ajax` (`AjaxMiddleware.php:41`). Also requires at least one registered AJAX config, else `findAll()`/`$ajaxConfigs[$ajaxId]` dereferences an unset global. Class is `@deprecated`.
+
+## Trigger (selects a config, does not inject a class)
+```
+GET /ajax/?vendor=<RegisteredVendor>&ajax=<RegisteredName>-<method>
+```
+
+## Version
+`ext_emconf.php` not present at expected path (empty read); package is `site/site-core`, class annotated `@deprecated in v3, will be removed in v4`.
+
+### skynettechnologies_typo3-allinoneaccessibility
+
+#### C — skynettechnologies/typo3-allinoneaccessibility — AwesomeMiddleware
+
+**Verdict: FALSE POSITIVE** (SSRF target URL is a hardcoded constant; attacker input only reaches the POST body of that fixed request)
+
+## Sink
+`Classes/Middleware/AwesomeMiddleware.php:33` — `curl_setopt($ch, CURLOPT_POSTFIELDS, $postData)` (flagged SSRF; actual network call is `curl_exec` line 35 on the handle created line 30).
+
+## Analysis
+The fetched URL host/scheme is fixed and not attacker-influenced:
+
+- `AwesomeMiddleware.php:27` `$apiUrl = "https://ada.skynettechnologies.us/api/widget-settings";` — **hardcoded**.
+- `AwesomeMiddleware.php:30` `$ch = curl_init($apiUrl);` — request target is the constant above; no request value flows into the URL.
+- Attacker-controlled data: `AwesomeMiddleware.php:23` `$domain = $_SERVER['HTTP_HOST'] ?? '';` → `AwesomeMiddleware.php:28` `$postData = ['website_url' => $domain]`. The Host header lands only in the **POST body** (`website_url` field) sent to the fixed API. It cannot redirect, change host/scheme, or introduce `file://`/internal targets.
+- `$domain_base64` (line 25) is computed but unused. `CURLOPT_FOLLOWLOCATION` is set, but redirects are followed from the trusted fixed API host, not from an attacker URL.
+
+No request-controlled fetch URL → not SSRF.
+
+## Related note (not the reported finding)
+The fixed-API JSON response is echoed unescaped into an inline `<script>` (`console.log('ADA Full API Response:', <json_encode>...)`) injected before `</body>`. The widget `$color/$position/$licensekey/$icon_*` variables are undefined here and fall back to constants (never request-sourced in this file), so there is no request-to-HTML reflected XSS via those. The Host header is reflected only through the remote API round-trip, gated by TYPO3's `trustedHostsPattern`. Not an SSRF and not a clean XSS chain.
+
+## Reachability
+Frontend middleware `Allinoneaccessibility-frontend` (`Configuration/RequestMiddlewares.php`), `after typo3/cms-frontend/prepare-tsfe-rendering` — runs pre-auth on frontend rendering. Reachable, but the sink is non-exploitable as SSRF.
+
+## Version
+`ext_emconf.php`: version `14.0.1`, state `stable`, `typo3` constraint `14.0.0-14.9.99`.
+
 ### smichaelsen_social-grabber
 
 #### Security Audit — `social_grabber` (Sebastian Michaelsen "Social Grabber")
@@ -5050,6 +5533,77 @@ No PSR-15 middleware. Command controllers (`GrabberCommandController`, `UpdatePo
 | Raw SQL in `FeedDataProcessor` | FALSE POSITIVE — editor FlexForm/DB config, not request input; `channelIds` int-normalized |
 
 **No confirmed pre-auth vulnerability.** The single anonymous entry point is token-gated and has no injection sink.
+
+### sourcebroker_restrictfe
+
+#### D — sourcebroker/restrictfe — RequestCheck middleware
+
+**Verdict: NEEDS-CONFIG** (reflected XSS into the text/html 403 page via the Host header, gated by TYPO3 `trustedHostsPattern`; no direct query/body reflection)
+
+## Sink
+`Classes/Middleware/RequestCheck.php:83` — `echo $outputContent;` (Content-Type `text/html`, header set line 75).
+
+## Analysis
+The only value reflected into the echoed HTML is host-derived, not a raw query/body parameter:
+
+- `RequestCheck.php:57` `$beLoginLink = GeneralUtility::getIndpEnv('TYPO3_SITE_URL') . 'typo3/';`
+- `RequestCheck.php:58` `$templateContent = file_get_contents($templatePath)` (template path from config).
+- `RequestCheck.php:62` `$outputContent = str_replace('{beLoginLink}', $beLoginLink, $templateContent);` — **no `htmlspecialchars`**.
+- `RequestCheck.php:75` `header('Content-Type: text/html; charset=utf-8')` then `RequestCheck.php:83` `echo $outputContent;` — confirmed HTML response (403), not JSON/redirect.
+
+`getIndpEnv('TYPO3_SITE_URL')` is built from the request Host header (`HTTP_HOST`). A Host value such as `evil"><script>alert(document.domain)</script>` is placed unescaped into the 403 body wherever the template contains `{beLoginLink}` → reflected XSS.
+
+**Gate:** TYPO3 validates the Host header against `$GLOBALS['TYPO3_CONF_VARS']['SYS']['trustedHostsPattern']` before `getIndpEnv` returns it. Modern TYPO3 defaults reject a spoofed/HTML-bearing Host, which neutralizes this. Exploitable only when an operator has set a permissive pattern (`.*`) — a known but non-default misconfiguration. The template must also contain the `{beLoginLink}` placeholder (the shipped default template does). Hence NEEDS-CONFIG rather than CONFIRMED.
+
+Note: the full request URL (incl. query string) is written to the `tx_restrictfe_redirect` cookie (line 66) but is **not** echoed into HTML, so query-string XSS does not apply here.
+
+## Reachability
+Frontend middleware `sourcebroker/restrictfe/request-check` (`Configuration/RequestMiddlewares.php`), `before typo3/cms-frontend/timetracker` — runs early, **pre-auth**. Its purpose is to block the frontend for unauthenticated visitors and serve this 403 page, so the blocked/echo state is the default active state for any anonymous request when the extension protects the instance. The XSS-relevant reflection therefore fires for unauthenticated attackers.
+
+## Trigger (requires permissive `trustedHostsPattern`)
+```
+GET / HTTP/1.1
+Host: x"><script>alert(document.domain)</script>
+```
+(sent to an instance protected by restrictfe with `[SYS][trustedHostsPattern]='.*'`)
+
+## Version
+`ext_emconf.php`: version `12.0.1`, state `stable`, `typo3` constraint `11.5.0-13.4.999`.
+
+### stmllr_typo3-zahnstocher
+
+#### A — stmllr/typo3-zahnstocher — eID Dispatcher
+
+**Verdict: FALSE POSITIVE** (bounded dispatcher, not arbitrary code injection / RCE)
+
+## Sink
+`Classes/eID/Dispatcher.php:61` — `$controller->$action();`
+
+## Analysis
+Both the class and method names come from request input, so CodeQL flags a "code injection". But the reachable callable set is tightly bounded and cannot escape the extension's own namespace:
+
+- `Classes/eID/Dispatcher.php:51` `$controllerName = GeneralUtility::_GP('controller')`
+- `Classes/eID/Dispatcher.php:52` `$actionName = GeneralUtility::_GP('action')`
+- `Classes/eID/Dispatcher.php:53` both validated by `isParameterValid()` → `preg_match('/^[a-zA-Z]+$/')` — **letters only**, no backslash / dot / digit, so no namespace traversal.
+- `Classes/eID/Dispatcher.php:83` (`getControllerInstance`) hardcodes the prefix `Stmllr\Zahnstocher\Controller\` and gates on `class_exists()`. Only classes actually shipped in that namespace can be instantiated.
+- `Classes/eID/Dispatcher.php:59-60` action = `$actionName.'Action'` gated by `method_exists()`.
+
+Only one controller exists: `Classes/Controller/MailboxController.php`, exposing `showAction()` (dumps the mbox fixture file) and `flushAction()` (deletes it). Both take **no request-derived arguments**. The attacker cannot supply an arbitrary class, an arbitrary callable, or any argument data — only choose between two benign test-helper actions on one fixed class. This is a whitelisted controller/action dispatcher, not code injection.
+
+## Reachability
+Pre-auth. Registered as eID: `ext_localconf.php` → `$GLOBALS['TYPO3_CONF_VARS']['FE']['eID_include']['tx_typo3_zahnstocher']`. Reachable unauthenticated.
+
+## Non-RCE note (out of scope for this finding)
+`flushAction` will unlink/blank the mailbox fixture file pre-auth, and `showAction` discloses captured mail — a minor pre-auth info-disclosure / data-loss issue in a dev/test extension, but **not** the reported code-injection class. No path to arbitrary code execution.
+
+## Trigger (illustrative, non-RCE)
+```
+GET /index.php?eID=tx_typo3_zahnstocher&controller=MailboxController&action=show
+GET /index.php?eID=tx_typo3_zahnstocher&controller=MailboxController&action=flush
+```
+
+## Version
+`ext_emconf.php`: version empty (dev), state `beta`, `typo3` constraint `6.2.0-7.6.99` (legacy; not installable on supported TYPO3).
 
 ### subugoe_bib
 
@@ -5328,7 +5882,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 1006 raw -> 780 after noise filter
+# 1157 raw -> 926 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [CRIT] Code injection       pixelant_pxa-pm-importer     Classes/Controller/Ajax/ProgressBarController.php:42
@@ -5345,6 +5899,8 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:91
 [CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:94
 [CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:95
+[CRIT] Code injection       site_site-core               Classes/Http/Middleware/AjaxMiddleware.php:84
+[CRIT] Server-side request  skynettechnologies_typo3-all Classes/Middleware/AwesomeMiddleware.php:33
 [CRIT] Code injection       blueways_bw-bookingmanager   Classes/Controller/Backend/EntryListModuleController.php:30
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:299
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:393
@@ -5368,6 +5924,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:211
 [CRIT] SQL injection        netresearch_nr-vault         Classes/Controller/AuditController.php:95
 [CRIT] Code injection       oktopuce_site-generator      Classes/Controller/SiteGeneratorController.php:181
-[CRIT] Unsafe deserializati oktopuce_site-generator      Classes/Controller/SiteGeneratorController.php:154
-[CRIT] Code injection       oliverklee_seminars          Classes/FrontEnd/DefaultController.php:385
 ```

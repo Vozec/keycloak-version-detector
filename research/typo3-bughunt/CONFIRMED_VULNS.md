@@ -255,6 +255,11 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
   `###GUESTBOOK_ENTRY###=nl2br($row['entry'])` (`:568`) etc. via `substituteMarkerArrayCached`
   into the HTML template. Every visitor loading the LIST page executes the payload. Gated only
   if `manual_backend_release=1` (approval-before-display) — **default off**. Med.
+- sourcebroker/restrictfe 12.0.1: **config-gated** Host-header reflected XSS. The 403 block page
+  (`RequestCheck.php:75` text/html) substitutes `getIndpEnv('TYPO3_SITE_URL')` (Host-derived) into
+  `{beLoginLink}` unescaped (`:62`). A `Host: x"><script>…` fires — but only when TYPO3's
+  `trustedHostsPattern` is set permissively (`.*`), a known misconfiguration; the default pattern
+  rejects spoofed Hosts. Pre-auth (the 403 is the default anon state), but needs-config. Low.
 - realurl 1.12.8.19: conditional 404-URL-reflection XSS + below the 1.12.9 XSS fix.
 - ecodev/tagpack 0.13.0: pre-auth reflected XSS — `pi1` echoes `piVars[searchWord|from|to]`
   and arbitrary GET params into `<input value="…">` unencoded
