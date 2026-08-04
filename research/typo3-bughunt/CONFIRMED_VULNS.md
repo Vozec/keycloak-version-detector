@@ -133,6 +133,21 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - Distinct from the historical CVE-2013-4682 (fixed in 2.0.39); this sink is still
   present in the abandoned 5.1.110 release. Numeric params are `is_numeric`-guarded
   and `skeyword` uses `addslashes`, so `price_filter` is the outlier.
+- **5b. Also in multishop 5.1.110 — pre-auth SSRF (arbitrary host + `file://` local read).**
+  `mslib_fe::file_get_contents($url)` (`class.mslib_fe.php:10385-10404`) does
+  `curl_init($url)`/`curl_exec` (then `file_get_contents` fallback) on any URL-scheme value
+  with **no host allow-list and no scheme restriction** (curl honours `file://`). Reached
+  pre-auth: `core.php:137` explicitly lets a **guest** into `admin_import` when GET
+  `action=run_job` ("allow running the import as a guest… through cronjob"); at
+  `admin_import.php:469` `mslib_fe::file_get_contents($this->post['file_url'])` runs, guarded
+  only by `if (strstr($file_url,"../")) die()` — which blocks nothing for
+  `http://169.254.169.254/…`, `http://127.0.0.1/…`, `file:///etc/passwd`. The DB-job overwrite
+  of `$this->post` at `:436` is gated by `is_numeric($_REQUEST['job_id'])`, so a non-numeric/
+  absent `job_id` skips it and leaves the attacker's POST `file_url` intact. Exploit:
+  `POST /index.php?...&tx_multishop_pi1[page_section]=admin_import&action=run_job` with body
+  `action=product-import-preview&file_url=http://169.254.169.254/latest/meta-data/`
+  → unauthenticated server-side fetch (cloud-metadata theft / internal port scan / local-file
+  read). Guest, no cHash/CSRF.
 
 
 ## 8. chrisgruen/realty-manager 4.0.0 (TYPO3 v10 LTS) — CRITICAL — two pre-auth SQL injections (ORIGINAL / 0-day)

