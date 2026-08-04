@@ -111,7 +111,19 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   `piVars`), and the lone raw pi1 query (`:3087`) is `edit_mode`-auth-gated + integer-sourced.
   No pre-auth SQLi/XSS. (The ve_guestbook stored XSS is confirmed separately.)
 
+## "SQLi" sinks that are actually search-engine (Solr/Elasticsearch) queries
+- **kitodo/presentation (dlf) 7.0.1** — `SearchInDocument.php:152` / `SearchSuggest.php:64`
+  `$query->setQuery(...)` are **Solarium/Apache-Solr** query objects (`Solr.php:581`
+  `makeInstance(Solarium\Client)`), not a DB QueryBuilder → misclassified as SQLi. `q` is
+  `Solr::escapeQuery()`-escaped; the only raw value is a non-numeric `uid` in SearchInDocument =
+  a low-severity **Solr query injection** (index read), and both middlewares are gated by an
+  encryptionKey-derived token (`encrypted` / HMAC `uHash`), so not cleanly anonymous. Not SQLi.
+
 ## ORDER BY / identifier concat where the sort field is a fixed allow-list or backend-only
+- **maispace/mai-faq 1.0.0** — `orderBy('f.'.$sort,$order)` (`FaqApiMiddleware.php:140`) but
+  `$sort` is `in_array(…,['sorting','question','uid'])`-whitelisted and `$order` normalized to
+  literal ASC/DESC; all other inputs `createNamedParameter`/`(int)`. Pre-auth `/api/faq` reachable
+  but no injectable sink. FP.
 - **kohlercode/slug 5.1.0** — real `orderBy($orderby,$order)` + raw table/column concat
   (`PageRepository.php:136`, `RecordRepository.php:89`), request-sourced via `getQueryParams`,
   but the routes are **backend AJAX** (`Configuration/Backend/AjaxRoutes.php`, BE-auth + CSRF,
