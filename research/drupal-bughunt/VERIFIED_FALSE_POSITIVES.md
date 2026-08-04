@@ -58,3 +58,13 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **inline_entity_form** `ElementSubmit.php:109` "code injection" — `call_user_func_array($cb,…)` over
   `#ief_element_submit`, a Form API render-array property set by IEF's own PHP (server-side), not
   request input; inside authenticated entity add/edit forms. Framework dispatch. FP.
+
+## imce (widely-used file manager, D9-11) — both CodeQL alerts FP + auth-gated
+- `ImceFM.php:374` "code injection" — `call_user_func($this->getConf('scanner','Imce::scanDir'),…)`;
+  the `scanner` conf key is never written from request input (always the hardcoded default). The
+  real op dispatch (`run()`) requires a per-user token then resolves the `jsop` string against
+  **registered plugin definitions** (whitelisted method), not the raw request. FP.
+- `ImceItem.php:111` "SSRF" — `getUri()` is a pure `Imce::joinPaths(root_uri,$path)` string join
+  producing a local stream-wrapper URI; nothing is fetched. FP.
+- Access is profile-gated (`Imce::access` → `roles_profiles`); anonymous only if an admin assigns
+  the anonymous role an IMCE profile. Auth-required by default.

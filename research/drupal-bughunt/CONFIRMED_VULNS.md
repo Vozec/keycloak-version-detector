@@ -59,3 +59,26 @@ legacy/abandoned cluster (CodeQL pipeline running).
   makes that an all-or-nothing trust decision the operator can't scope).
 - **Fix:** require an `email_verified`/equivalent claim (or a per-network "emails are verified" trust
   flag) before linking to an existing account by email.
+
+## 4. coolfilter (Drupal 5/6, abandoned) — HIGH — pre-auth PHP object injection via bundled PHPRPC 2.1 standalone scripts (ORIGINAL)
+- **Entry (pre-auth, bypasses Drupal entirely):** the module ships standalone scripts that
+  instantiate a 2006 PHPRPC server at **file scope with no Drupal bootstrap / access check** —
+  `rpc.php:1365 new phprpc_server(['play_media','coolplayer_rpc_version'])` and
+  `mbstring.php:15 new phprpc_server(['mb_urlencode','mb_convert_encoding'])`. Directly reachable at
+  e.g. `GET/POST /sites/all/modules/coolfilter/rpc.php` (or `/modules/coolfilter/rpc.php`).
+- **Sink:** the constructor → `start()` reads `$_REQUEST` and at `phprpc_server.php:195` does
+  `$arguments = unserialize(base64_decode($_REQUEST['phprpc_args']))` — **raw `unserialize` of
+  fully attacker-controlled bytes, no `['allowed_classes'=>false]`** (2006 code). The only gate to
+  reach it is `phprpc_func` ∈ the registered list (satisfied by `play_media`/`mb_urlencode`) and
+  `encrypt` defaults to 0 (no xxtea layer).
+- **Exploit:** `POST /sites/all/modules/coolfilter/rpc.php` body
+  `phprpc_func=play_media&phprpc_args=<base64(serialized POP-gadget object)>` → the object graph is
+  instantiated during `unserialize` before any RPC function runs → PHP object injection → RCE via a
+  POP chain in the host's autoloaded runtime (Symfony/Guzzle/…).
+- **Also (pre-auth reflected XSS):** `coolplayer.php` runs at file scope, echoes `$_GET` unescaped
+  (`:51 echo $url` from `coolplayer_url`; `:22-42` reflect `coolplayer_src/width/height/...` into a
+  `document.writeln`), `Content-Type: text/html`. `GET /…/coolplayer.php?coolplayer_url=<script>…</script>`.
+- **Caveat (honest):** coolfilter targets Drupal 5/6 (abandoned, low current deployment), and RCE
+  needs a POP gadget in the running app. But the standalone scripts are directly reachable
+  regardless of Drupal version, and the object-injection primitive is unconditional. HIGH.
+- `phprpc_client.php` "SSRF" is a FP (fsockopen host is the hardcoded coolcode.cn, not request-driven).
