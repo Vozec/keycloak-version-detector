@@ -77,6 +77,20 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
 - **directmailteam/direct-mail 9.5.2** (mainline) — authCode polarity correct; already carries
   the TYPO3-EXT-SA-2020-005 fixes. (The **azich** fork regresses this — see CONFIRMED_VULNS.md #9.)
 
+## Hardened / not-pre-auth (verified, legacy cluster)
+- **ribase/sr_sendcard 4.0.1** — global input sanitizer runs before any use
+  (`SendcardPluginController.php:118-127`: `htmlspecialchars(strip_tags())` on every `_GP`,
+  `card_image_path` force-cleared). SQLi uses `intval`/`fullQuoteStr`/array-INSERT; mail via
+  Swift `MailMessage` (CRLF-safe); no user-controlled redirect; SSRF path cleared. All FP.
+- **phorax/mydashboard** — **backend module** (`extends BaseScriptClass`, `addModule`
+  `user_txmydashboardM1`, all entry points use `$GLOBALS['BE_USER']`). Not pre-auth. SQLi is
+  `intval` on the acting BE user's own uid; no upload code; IDOR bound to own uid. (Residual:
+  BE-authenticated self-XSS/CSRF in the AJAX handlers — not pre-auth.)
+- **dmitryd/dd-googlesitemap 2.3.2 & communiacs/dd-googlesitemap 2.1.7** — the historic
+  `L`/`pidList` eID SQLi is **fixed** in both cloned forks (byte-identical generator code):
+  `pidList` via `intExplode`, `L` via `MathUtility::canBeInterpretedAsInteger`, `offset`/`limit`
+  via `(int)`, `newsId`/`singlePid` via `intval`. No tainted string reaches raw SQL.
+
 ## Recurring FP shapes → generic query improvements to make (feeds codeql-php work)
 1. **Code-injection on dynamic dispatch must require the METHOD/CLASS NAME to be tainted**,
    not just an argument. A `'get'.ucfirst($x)` / `method_exists`-guarded / literal-`switch`

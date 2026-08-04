@@ -144,6 +144,21 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - Fork-specific: mainline `directmailteam/direct-mail` 9.5.2 has correct polarity and
   the TYPO3-EXT-SA-2020-005 (CVE-2020-12699/12700) fixes.
 
+## 10. datamints/datamints_feuser 0.12.5 (TYPO3 6.2–10.4) — MEDIUM — pre-auth usergroup mass-assignment → privilege escalation (ORIGINAL, needs-config)
+- Same class as femanager (#2), different extension. Anonymous frontend registration
+  (`showtype=register`; the login gate `:162` only guards `edit`, and the write guard
+  `:262` is satisfiable anonymously with `userid=0`, current `pageid`, `submitmode=register`).
+- `user[usergroup][]` is only sanitized by `cleanMultipleSelectField()`
+  (`class.tx_datamintsfeuser_pi1.php:809` `$arrCleanedValues[] = intval($val)`) — **`intval`
+  + maxitems only, no allow-list of permitted `fe_groups` uids**. `:1144`
+  `$arrUpdate['usergroup'] = $arrUpdate['usergroup'] ?: <default>` (submitted value wins) →
+  `:1162 exec_INSERTquery('fe_users', $arrUpdate)`.
+- **Exploit:** anonymous `POST` registration with `tx_datamintsfeuser_pi1[<cid>][usergroup][]=<privileged fe_group uid>`
+  → account joins an arbitrary/privileged frontend group.
+- **Precondition (needs-config):** `usergroup` must be a rendered field (in the admin
+  `usedfields`) — a common self-service config. SQLi/IDOR paths are `fullQuoteStr`/session-uid
+  bound (clean). Fix: allow-list submitted group uids.
+
 ---
 
 ## 7. caretaker/caretaker 1.0.3 — MEDIUM — pre-auth eID auth bypass → monitoring info disclosure (ORIGINAL)
