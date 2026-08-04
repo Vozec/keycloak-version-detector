@@ -111,6 +111,19 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   `piVars`), and the lone raw pi1 query (`:3087`) is `edit_mode`-auth-gated + integer-sourced.
   No pre-auth SQLi/XSS. (The ve_guestbook stored XSS is confirmed separately.)
 
+## ORDER BY / identifier concat where the sort field is a fixed allow-list or backend-only
+- **kohlercode/slug 5.1.0** — real `orderBy($orderby,$order)` + raw table/column concat
+  (`PageRepository.php:136`, `RecordRepository.php:89`), request-sourced via `getQueryParams`,
+  but the routes are **backend AJAX** (`Configuration/Backend/AjaxRoutes.php`, BE-auth + CSRF,
+  none `access=public`). "slug" is a backend editorial module, not FE slug resolution. Not pre-auth.
+- **in2code/lux 43.1.0** — raw-concat SQL at `PagevisitRepository.php:341`, but time filter is
+  `format('U')` ints, site filter is `Connection::quote()`, domains pass a `cleanString('./_-')`
+  allow-list, limit is typed int. Only caller is a backend dashboard widget. FP.
+- **jweiland/kk-downloader 7.0.0** — `orderBy('i.'.$orderBy,$direction)` (`DownloadRepository.php:67`)
+  but `$orderBy`/`$direction` come from the content element's **FlexForm** (`pi_getFFvalue`),
+  fixed `selectSingle` allow-lists (name/image/crdate/…, ASC/DESC) — editor config, not request.
+  `pointer` is `(int)`-cast. Anonymous FE plugin, but the injectable inputs aren't request-reachable.
+
 ## Recurring FP shapes → generic query improvements to make (feeds codeql-php work)
 1. **Code-injection on dynamic dispatch must require the METHOD/CLASS NAME to be tainted**,
    not just an argument. A `'get'.ucfirst($x)` / `method_exists`-guarded / literal-`switch`
