@@ -170,6 +170,171 @@ extension nonetheless fails to enforce its own allowlist, permitting upload of d
 3. **Finding 3:** Enforce `settings['allowedFileExtension']` (and a MIME check) in `UploadService::upload()`
    as done in `editAction`; reconsider whether empty `fe_group_addfile` should grant anonymous upload.
 
+### aoe_extracache
+
+#### Security Audit — `aoe_extracache` (extracache)
+
+- **Extension:** aoe_extracache / EXT key `extracache`
+- **Version audited:** 0.9.1 (`ext_emconf.php`)
+- **TYPO3 constraint:** 6.2.0 – 7.6.99, depends on `nc_staticfilecache`
+- **Path:** `/home/user/sources/code/typo3-extensions/aoe_extracache`
+- **Role:** Extends `nc_staticfilecache`. Its `Dispatcher->dispatch()` is wired into `SC_OPTIONS['tslib/index_ts.php']['preprocessRequest']` (`ext_localconf.php` → `Bootstrap::initializeHooks`, line 65) so it **runs pre-auth on every frontend request** to serve pages straight from the static file cache.
+
+## Summary / verdict
+
+CodeQL flagged three things: reflected XSS at `Dispatcher.php:208`, path traversal in `CacheFileRepository` (83/103/118), and code injection. After tracing request→sink:
+
+- **The pre-auth path (Dispatcher) has NO exploitable reflected XSS.** `echo $content` outputs the *cached HTML file* (`file_get_contents` of a server-rendered cache entry), not any reflected request parameter. This is a **false positive** for reflected XSS.
+- **The genuinely tainted sinks (SQLi, arbitrary method call, file delete) all live in the backend `web_info` module (`CacheManagementController` / `modfunc1`) and are POST-AUTH** (require a logged-in backend user with the module). The path traversal is additionally blocked by an explicit `..` check.
+
+**No clean pre-auth vulnerability found.** Real but backend-authed issues are documented below for completeness.
+
+---
+
+## Finding 1 — Reflected XSS at `Dispatcher.php:208` — FALSE POSITIVE (pre-auth)
+
+- **Severity:** Informational (not a reflected XSS)
+- **Pre-auth:** Yes (dispatcher runs pre-auth) — but not attacker-reflecting
+- **Sink:** `Classes/System/StaticCache/Dispatcher.php:208` `echo $content;`
+- **Source of `$content`:** `flush()` (line 76) → `AbstractManager::loadCachedRepresentation()` (`AbstractManager.php:161-171`) → `@file_get_contents($cacheRepresentation)`.
+
+**Analysis.** `$content` is the bytes of a static cache file that TYPO3/`nc_staticfilecache` wrote during a *previous, fully-rendered* frontend response. The dispatcher never echoes the current request's URL, query string, headers, or body. There is no request→`echo` taint path, so this is not reflected XSS.
+
+The only way `$content` becomes malicious is **cache poisoning at write time** (getting attacker HTML persisted into the cache file). Cache writing is done by the `nc_staticfilecache` `createFile_*` hooks against server-rendered output — not attacker-controlled here — so this extension does not introduce a stored-XSS primitive either.
+
+**Related lower-risk observations on the same pre-auth path (theoretical, not concretely exploitable):**
+- `AbstractManager::getPageInformationFromCachedRepresentation()` (`AbstractManager.php:119`) runs `unserialize()` on a slice of the cache-file content, and `Dispatcher::initializeFrontEnd()` (`Dispatcher.php:150`) does `$_GET = array_merge($_GET, $pageInformation['GET'])`. Both consume **cache-file content**, which is trusted (server-written). Only reachable as an object-injection / GET-poisoning primitive if an attacker can already write into the cache directory — not a pre-auth remote condition.
+- Cache-key path is built from `getHostName()` (`TYPO3_HOST_ONLY`) and `getFileName()` (`TYPO3_SITE_SCRIPT`) in `StaticFileCacheManager::getCachedRepresentation()` (`StaticFileCacheManager.php:30-46`) and read via `file_get_contents`. A fixed `/index.html` suffix is always appended and `TYPO3_HOST_ONLY` is constrained by TYPO3's trusted-hosts protection, so this is not a usable arbitrary-file-read.
+
+---
+
+## Finding 2 — Path traversal in `CacheFileRepository::removeFile/removeFolder` — MITIGATED + POST-AUTH
+
+- **Severity:** Low (mitigated)
+- **Pre-auth:** No (backend `web_info` module)
+- **Source:** `$_GET['id']` in `CacheManagementController::deleteFileAction()` (`CacheManagementController.php:189`) and `deleteFolderAction()` (line 200)
+- **Sink:** `CacheFileRepository.php:83` `unlink($path)`, `:103` `rename($path,...)`, `:118` `rmdir($temp_path)`; `$path = $this->cacheDir . $fileName`
+
+**Tainted path.** `modfunc1::main()` calls `deleteFileAction`, which passes `$_GET['id']` to `removeFile()`. `removeFile()` does `$fileName = base64_decode($id)` then:
+
+```php
+if (FALSE === $fileName || FALSE !== strpos($fileName, '..')) {
+    throw new Exception('invalid id');
+}
+$path = $this->cacheDir . $fileName;
+```
+
+**Why it is not exploitable as traversal:** any `..` in the decoded name is rejected, and the decoded value is *concatenated after* `cacheDir` (a `PATH_site`-anchored directory), so an absolute-looking payload like `/etc/passwd` becomes `<cacheDir>/etc/passwd` and cannot escape the prefix. Reachable **only** through the backend `web_info` module function (`ext_tables.php:41-47`, `insertModuleFunction('web_info', 'tx_extracache_modfunc1', …)`), which requires an authenticated backend user. Not pre-auth.
+
+---
+
+## Finding 3 — SQL injection in `CacheManagementController` — REAL, POST-AUTH
+
+- **Severity:** Medium (backend-authed)
+- **Pre-auth:** No (backend `web_info` module; requires BE login)
+- **Source:** backend module data set from `GeneralUtility::_GP(...)` — e.g. `setConfigSearchPhraseForTablePagesAction()` (`CacheManagementController.php:278-285`) stores `searchPhraseForTablePages`; consumed by `getModuleData()`.
+- **Sink chain:** `createSqlWhereClauseForDbRecords()` (`CacheManagementController.php:357-370`) builds
+  `$sqlWhere .= ' AND '.$field.' like \'%'.$value.'%\''` from an unescaped, user-split `field:value` phrase → passed as raw `$where` to `CacheDatabaseEntryRepository::query()` (`CacheDatabaseEntryRepository.php:61-63`) → `$GLOBALS['TYPO3_DB']->exec_SELECTgetRows('*', $table, $where, …)`.
+
+Both `$field` and `$value` reach the SQL string with no quoting/`fullQuoteStr`, so a backend user viewing the cache-manager tables can inject SQL (e.g. phrase `uid=1) UNION SELECT ... -- `). Also note `allDatabaseEntrysForTablePagesAction` (line 134-143) and `allDatabaseEntrysForTableStaticCacheAction` (149-158) feed the same helper. Genuine SQLi, but gated behind backend authentication + module access — **not pre-auth**.
+
+**PoC (requires BE session):** In the "Static Cache" web_info module, set the table search filter to `uid:0 OR 1=1) UNION SELECT ...--`. The `field`/`value` split on `:` lands unescaped in the `WHERE`.
+
+---
+
+## Finding 4 — Arbitrary controller-method invocation via `action` — POST-AUTH ("code injection" flag)
+
+- **Severity:** Low (backend-authed, constrained)
+- **Pre-auth:** No
+- **Source/sink:** `modfunc1/class.tx_extracache_modfunc1.php` `main()`:
+  `$action = GeneralUtility::_GP('action'); … $action = $action.'Action'; $output = call_user_func(array($this->cacheManagementController, $action));`
+
+The GET/POST `action` selects which method of `CacheManagementController` is called. This is the likely CodeQL "code-injection" candidate. It is **not** arbitrary PHP execution — the callable target is fixed to the controller instance and the name is suffixed with `Action`, so it can only reach that controller's methods. Reachable only inside the authenticated `web_info` backend module. Low impact (at most calling the module's own actions).
+
+---
+
+## Cross-reference vs advisories
+
+No TYPO3 Security Team advisory (`TYPO3-EXT-SA-*`) is published for `extracache`/`aoe_extracache`; it is a low-distribution AOE extension pinned to legacy TYPO3 6.2–7.6 and uses the removed `$GLOBALS['TYPO3_DB']` API, so it cannot run on supported TYPO3. The backend SQLi (Finding 3) is the most material issue but requires backend access. **Recommendation:** parameterize `createSqlWhereClauseForDbRecords` (whitelist `$field`, `fullQuoteStr($value)`), and treat the extension as end-of-life on unsupported TYPO3.
+
+### aoepeople_crawler
+
+#### Security Audit — `aoepeople_crawler` (crawler)
+
+- **Extension:** aoepeople/crawler / EXT key `crawler`
+- **Version audited:** 13.0.0 (`ext_emconf.php`; composer `aoepeople/crawler` / `typo3-ter/crawler`)
+- **TYPO3 constraint:** 13.4.0 – 14.4.99, PHP 8.2–8.99
+- **Path:** `/home/user/sources/code/typo3-extensions/aoepeople_crawler`
+- **Role:** Page-tree crawler for cache warmup / indexing / publishing. UI is a backend module; it also registers **two pre-auth frontend middlewares** (`Configuration/RequestMiddlewares.php`).
+
+## Summary / verdict
+
+CodeQL flagged XSS at `BackendModuleStartCrawlingController.php:135`. Trace + pre-auth review of every request surface:
+
+- **The flagged XSS is POST-AUTH and effectively a non-issue.** Line 135 `echo`s crawl URLs into a forced `application/octet-stream` *attachment download*, inside a backend module requiring an authenticated BE user. Not rendered as HTML, not pre-auth.
+- **The real pre-auth surface — the `FrontendUserAuthenticator` middleware (`X-T3CRAWLER` header) — is correctly hardened.** Authentication is a `hash_equals` check against `md5(qid|set_id|encryptionKey)`; the queue id goes through a parameterized query; FE-group elevation reads from the server-side queue record, not from attacker input. Forging it requires the site `encryptionKey` (secret). **Not exploitable pre-auth.**
+- **No untrusted deserialization, no pre-auth SSRF.** The middleware uses `json_decode`; the only `unserialize()` is in `cli/bootstrap.php` on `$_SERVER['argv'][3]`, which is not reachable over HTTP.
+
+**No pre-auth vulnerability found.** Details below.
+
+---
+
+## Finding 1 — XSS at `BackendModuleStartCrawlingController.php:135` — POST-AUTH, forced download (effectively FP)
+
+- **Severity:** Low / Informational
+- **Pre-auth:** No — backend module `web_site_crawler_*`, `Configuration/Backend/Modules.php` `'access' => 'user'` (authenticated BE user)
+- **Sink:** `Classes/Controller/Backend/BackendModuleStartCrawlingController.php:135`
+  `echo implode(CRLF, $downloadUrls);` (preceded by `header('Content-Type: application/octet-stream')` and `Content-Disposition: attachment; filename=CrawlerUrls.txt`, line 131-132), then `exit`.
+- **Source of `$downloadUrls`:** `CrawlerController->downloadUrls`, populated by `getPageTreeAndUrls()` from the page tree + crawler configuration (line 114-128), triggered only when `_download` is set (`RequestHelper::getBoolFromRequest`).
+
+**Analysis.** The response is a forced file download with a non-HTML content type, so browsers do not render it; there is no reflected-into-HTML context. The URL values derive from crawler configuration/page records, and reaching this code requires an authenticated backend user with the crawler module. Even treated as output-encoding hygiene it is post-auth and low impact. Other user-influenced values rendered in the module (`selectorBox`, line 230-254) are passed through `htmlspecialchars(ENT_QUOTES|ENT_HTML5)`.
+
+---
+
+## Finding 2 — Pre-auth `FrontendUserAuthenticator` middleware — REVIEWED, SECURE
+
+- **Severity:** None (correctly implemented)
+- **Pre-auth:** Yes (runs on every frontend request, `RequestMiddlewares.php` `frontend` group)
+- **File:** `Classes/Middleware/FrontendUserAuthenticator.php`
+
+**Flow (attacker controls the full `X-T3CRAWLER` header):**
+1. `explode(':', $crawlerInformation)` → attacker-chosen `$queueId` and `$hash` (line 67).
+2. `findByQueueId($queueId)` (line 134-150) — **parameterized**: `->eq('qid', $this->queryBuilder->createNamedParameter($queueId))`. No SQL injection.
+3. `isRequestHashMatchingQueueRecord()` (line 105-117) — `hash_equals($hash, md5($qid . '|' . $set_id . '|' . $GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey']))`. Timing-safe compare, secret-keyed. Forgery requires the site `encryptionKey`.
+4. Only on match: `feUserGroupList` is read from `$queueRec['parameters']` (the **server-written** queue row, `json_decode`, line 78) and used to elevate FE user groups (`getFrontendUser`, line 122-132).
+
+**Judgement.** The FE-group elevation is gated behind knowledge of `encryptionKey`, and the group list comes from the DB record rather than from request input, so an unauthenticated attacker cannot forge a request or inject arbitrary groups. `json_decode` (not `unserialize`) removes any object-injection risk on the parameters blob. This is the hardened, current-state implementation. **No vulnerability.**
+
+*(Minor, non-exploitable robustness note: `explode(':', …)` without a limit and no null-check before `findByQueueId` could emit PHP notices on a malformed header, but there is no security impact — a non-matching hash yields a `503` via `ErrorController::unavailableAction`.)*
+
+---
+
+## Finding 3 — Deserialization — REVIEWED, NOT REACHABLE
+
+- **Severity:** None
+- **`Classes/Middleware/CrawlerInitialization.php:94`** emits crawler meta as `json_encode(...)` in the `X-T3Crawler-Meta` response header. The code comment (line 92-93) documents the deliberate switch away from `serialize()` precisely to avoid the client unserializing a response header — i.e. the historical deserialization issue is already fixed.
+- **`cli/bootstrap.php:` `unserialize(base64_decode($_SERVER['argv'][3]))`** — the header array is produced by `SubProcessExecutionStrategy::fetchUrlContents()` (`base64_encode(serialize($requestHeaders))`, `SubProcessExecutionStrategy.php:79`) and passed as a **CLI argument** to a subprocess. `$_SERVER['argv']` is not populated over HTTP, so this sink is not attacker-reachable from the web. The headers themselves are built from the crawl URL by `buildRequestHeaders()` (self-produced). No untrusted deserialization.
+
+---
+
+## Finding 4 — SSRF / URL fetching — REVIEWED, NOT PRE-AUTH
+
+- **Severity:** None (design), not pre-auth
+- **File:** `Classes/CrawlStrategy/SubProcessExecutionStrategy.php`
+- The crawler fetches URLs taken from the **queue**, which is populated by backend-configured crawler configurations (backend/CLI), not by unauthenticated input. Execution is `shell_exec` of `php cli/bootstrap.php <basePath> <url> <headers>` with all parts run through `CommandUtility::escapeShellArguments()` + `escapeshellcmd()` (line 81-83) — no command injection. The subprocess invokes the **local** TYPO3 frontend (`getFrontendBasePath()` + local `index.php`), not an arbitrary outbound network client. Scheme is restricted to http/https (line 62). No pre-auth SSRF primitive.
+
+---
+
+## Finding 5 — Ajax `ProcessStatusController` — REVIEWED, POST-AUTH
+
+- `Configuration/Backend/AjaxRoutes.php`: route `crawler_process_status` has `'inheritAccessFromModule' => 'web_site_crawler_process'` → backend-authed. `getProcessStatus` reads a JSON `id`, passes it to `ProcessRepository::findByProcessId` (repository/QueryBuilder), and echoes only process metadata. No injection or pre-auth exposure.
+
+---
+
+## Cross-reference vs advisories
+
+The crawler has historical TYPO3 Security advisories in older major lines (XSS / privilege-escalation and an insecure-deserialization class of issue in the crawler queue/middleware). Version 13.0.0 is a current, actively maintained release: the FE authenticator uses `encryptionKey`+`hash_equals` with parameterized queries, and the meta transport was moved to JSON (`CrawlerInitialization` comment). The reviewed code reflects the **post-fix, hardened** state — no residual pre-auth issue identified. Only the post-auth backend download echo (Finding 1) is worth an output-hygiene cleanup.
+
 ### aoepeople_realurl
 
 #### Security Audit: aoepeople/realurl (AOE fork)
@@ -330,6 +495,165 @@ No concrete pre-auth exploitable vulnerability (SQLi, XSS, object injection, pat
 ## Verdict
 
 No actionable pre-auth source→sink vulnerability identified in the audited scope for this version.
+
+### azich_direct-mail
+
+#### Security Audit — `azich/direct-mail` (v6.0.0-dev)
+
+TYPO3 newsletter/direct-mail extension. CodeQL flagged 16 SQL-injection candidates.
+Scope of this review: **pre-authentication** attack surface = the frontend jumpUrl /
+click-tracking middleware and the FE-rendering hook. Backend modules (BE-login required)
+are noted but out of pre-auth scope.
+
+## Summary
+
+| # | Finding | Severity | Pre-auth | Type |
+|---|---------|----------|----------|------|
+| 1 | Inverted `authCode` check in `JumpurlController::validateAuthCode` — authentication bypass | **MEDIUM** | **YES** | Broken auth / IDOR / PII enumeration |
+| 2 | 16 CodeQL SQLi candidates are all backend-module / `intval`-guarded — NOT pre-auth, NOT injectable | Info | No | (false / non-exploitable) |
+| 3 | FE `simulateUsergroup` group-simulation gated by random 32-hex token | Info | (n/a) | Not exploitable |
+
+**Real bug: Finding 1** — the frontend jumpUrl auth-code verification logic is inverted,
+so an unauthenticated attacker who supplies an empty or wrong `aC` passes the check for
+any recipient/mail id.
+
+---
+
+## Finding 1 — Authentication bypass via inverted authCode validation (PRE-AUTH)
+
+- **Severity:** MEDIUM (would be HIGH but the FE auto-login sink is dead — see below)
+- **Pre-auth:** YES — unauthenticated frontend request through the jumpUrl middleware.
+- **Source → sink:**
+  - Source: `Classes/Middleware/JumpurlController.php:85-88` — `mid`, `rid`, `aC`, `jumpurl` from `$request->getQueryParams()`.
+  - Sink (broken check): `Classes/Middleware/JumpurlController.php:312-330` (`validateAuthCode`).
+- **Registration:** middleware registered in `Configuration/RequestMiddlewares.php` on every FE request; `shouldProcess()` fires whenever `mid` is present (`JumpurlController.php:217-220`).
+
+### Tainted path
+
+`process()` (line 79) reads request params, and for an integer `jumpurl`:
+
+```
+initDirectMailRecord($mailId)            // loads sys_dmail row (parameterized, int)
+initRecipientRecord($submittedRecipient) // rid "t_<uid>"/"f_<uid>" -> loads recipient row
+if (!empty($this->recipientRecord)) {
+    $this->validateAuthCode($submittedAuthCode);   // <-- BROKEN
+    $jumpurl = $this->substituteMarkersFromTargetUrl($targetUrl);
+    $this->performFeUserAutoLogin();
+}
+```
+
+The check itself (lines 312-330):
+
+```php
+protected function validateAuthCode($submittedAuthCode): void
+{
+    $authCodeToMatch = GeneralUtility::stdAuthCode(
+        $this->recipientRecord,
+        ($this->directMailRecord['authcode_fieldList'] ?? 'uid')
+    );
+    if (!empty($submittedAuthCode) && $submittedAuthCode === $authCodeToMatch) {
+        throw new \Exception('authCode verification failed. ...', 1376899631);
+    }
+}
+```
+
+The logic is **inverted**:
+- empty `aC`  → condition false → **no throw → passes**
+- wrong `aC`  → condition false → **no throw → passes**
+- *correct* `aC` → condition true → throws ("verification failed")
+
+So the guard rejects only the legitimate holder of the code and lets everyone else
+through. This defeats the per-recipient auth code whose entire purpose is to ensure the
+person following a personalized newsletter link is the recipient encoded in `rid`.
+Contrast with the upstream `directmailteam` fork, which uses
+`AuthCodeUtility::validateAuthCode()` (returns bool) and explicitly
+`throw`s when `!$valid` — i.e. the correct polarity. This is a fork-introduced defect.
+
+### Exploitability / impact
+
+After the bypass, `substituteMarkersFromTargetUrl()` (lines 338-401) replaces
+`###USER_<field>###` markers in the stored newsletter link (`absRef` from the sent mail)
+with fields of the recipient identified by the attacker-chosen `rid`, then the request is
+redirected to that URL (`juHash` recomputed, lines 140-143). Because personalized
+newsletter links legitimately carry markers such as `###USER_email###` /
+`###USER_name###` (that is precisely why jumpUrl resolves them per-recipient at click
+time), an attacker can iterate `rid=t_1, t_2, …` (tt_address) and `rid=f_1, f_2, …`
+(fe_users) for a valid `mid` and read each recipient's personal fields out of the
+resulting `Location`, i.e. **unauthenticated subscriber/e-mail enumeration (PII / GDPR)**.
+It also lets anyone forge click-tracking rows for arbitrary recipients.
+
+The more dangerous sink, `performFeUserAutoLogin()` (lines 409-422), which would set
+`$_POST['user']/['pass']/logintype=login` from the recipient row, is **not reachable in
+this fork**: it requires `$this->recipientTable === 'fe_users'`, but the fork's constant
+is `RECIPIENT_TABLE_FEUSER = 'fe_user'` (singular, line 40) assigned at line 295. The
+string mismatch means the branch never executes, so FE session takeover does **not**
+occur here. (Remove the typo and this becomes a pre-auth account-takeover.)
+
+### PoC
+
+```
+GET /index.php?eID=tx_directmail&mid=1&rid=t_1&jumpurl=0&aC= HTTP/1.1
+```
+(Any FE URL that runs the middleware works; `aC` empty or arbitrary.) For a mail whose
+link template contains `###USER_email###`, the 30x `Location` returned for `rid=t_1`,
+`rid=t_2`, … leaks each recipient's email — no auth code needed. Correct `aC` values, by
+contrast, produce HTTP 500 (`authCode verification failed`), confirming the inversion.
+
+### Remediation
+
+Invert the condition: proceed only when a non-empty `aC` **equals** the computed code,
+and throw otherwise — mirror `directmailteam`'s `AuthCodeUtility::validateAuthCode()`.
+Also fix the `fe_user`→`fe_users` constant (or disable `performFeUserAutoLogin` entirely).
+
+---
+
+## Finding 2 — CodeQL SQLi candidates are backend-module / integer-guarded (NOT pre-auth)
+
+No pre-auth SQL injection exists. Every request-reachable query on the pre-auth path uses
+parameter binding or hard int casts:
+
+- `initDirectMailRecord` (`JumpurlController.php:227-245`) — `createNamedParameter($mailId, PDO::PARAM_INT)`.
+- `getRawRecord` (`JumpurlController.php:188-210`) — `$uid = (int)$uid;` then `createNamedParameter(..., PARAM_INT)`.
+- `initRecipientRecord` (`:281-305`) — `rid` split on `_`; only the numeric part reaches `getRawRecord`, which int-casts it. The table name is chosen from a fixed `switch` (`t`/`f`) — not attacker text.
+- `hasRecentLog` (`:154-176`) — all predicates `createNamedParameter`.
+- Maillog `insert()` uses an array of typed values (`:122-135`).
+
+The 16 flagged raw `->add('where', '…' . $var . '…')` sinks live in **backend modules and
+utilities that require a valid TYPO3 backend session**, and the interpolated request parts
+are `intval()`-wrapped:
+
+- `Classes/Module/Statistics.php` (e.g. lines 269, 364, 379, 400, 462, 602-655, 1008…1376) — `Statistics extends BaseScriptClass` (BE module); `mid=' . intval($row['uid'])`, `pid=' . intval($this->id)`, `tt_address.uid=' . intval($uid)`.
+- `Classes/Module/Dmail.php` (1177, 1215), `Classes/Module/RecipientList.php` (891, 910), `Classes/Module/MailerEngine.php` (401, 423) — BE modules; `IN (` lists built from `intval`/`implode` of int uids.
+- `Classes/DirectMailUtility.php:544, 689, 728` and `Classes/Hooks/TtnewsPlaintextHook.php:119` — invoked from BE modules / mail composition; `$groupIdList` is int uids, `$pidList` passes through `createNamedParameter`, `pid=' . intval($row['pid'])`.
+
+These are not reachable pre-auth and are not concretely injectable. (`Statistics.php:400`
+`->add('where','uid_local=' . $row['uid'])` uses a DB-sourced value inside a BE module — a
+code-smell worth hardening, but not attacker-tainted and not pre-auth.)
+
+---
+
+## Finding 3 — FE `simulateUsergroup` hook (not exploitable)
+
+`Classes/Hooks/TypoScriptFrontendController.php:39-52` reads `dmail_fe_group` +
+`access_token` from GET and can raise the FE user's group. It is gated by
+`DirectMailUtility::validateAndRemoveAccessToken()` (`DirectMailUtility.php:1420-1430`),
+which strict-compares against a 32-char `Random::generateRandomHexString(32)` stored in the
+registry and is single-use. Not brute-forceable; no bypass.
+
+---
+
+## Known CVEs / advisories (cross-reference)
+
+- **TYPO3-EXT-SA-2020-005** — direct_mail: **CVE-2020-12699** jumpUrl Open Redirect,
+  **CVE-2020-12700** information disclosure via CSV "special query" export (fixed 5.2.4).
+  This fork is a 6.x-dev line: the jumpUrl integer path is constrained by stored
+  `absRef` + recomputed `juHash`, and `isAllowedJumpUrlTarget` (`:444-462`) throws on
+  arbitrary valid URLs, so the classic open-redirect is mitigated — but the **authCode
+  inversion (Finding 1) is a new, fork-specific regression** not covered by any advisory.
+
+Sources:
+- https://typo3.org/security/advisory/typo3-ext-sa-2020-005
+- https://advisories.gitlab.com/pkg/composer/directmailteam/direct-mail/CVE-2020-12699/
 
 ### beechit_default-upload-folder
 
@@ -774,6 +1098,143 @@ The one **real, concrete finding** is a broken authentication check: `validApiKe
 
 **Verdict: no pre-auth unserialize/RCE here. Real bug = broken eID API-key check (empty-key auth bypass → monitoring info disclosure) when the eID is enabled.**
 
+### chrisgruen_realty-manager
+
+#### Security Audit — chrisgruen/realty-manager (Realty Manager) v4.0.0
+
+TYPO3 Extbase real-estate manager. Frontend plugin `RealtyManager / Immobilienmanager`
+(Extbase signature `tx_realtymanager_immobilienmanager`) exposing the actions
+`list, form, search, detail, ajaxselectdistrict, ajaxsearch` — all reachable by an
+**unauthenticated website visitor** (no FE login required).
+
+## Summary
+
+Two **pre-auth SQL injection** vulnerabilities confirmed. Both are exploitable by any
+anonymous visitor to a page containing the plugin. Frontend search parameters flow
+directly into string-concatenated SQL executed via `Connection::executeQuery()`.
+CodeQL's SQLi candidates are **real, not false positives** — the safe queries in the
+repository use `createNamedParameter()`, but several methods build raw SQL by string
+concatenation of request data.
+
+| # | Severity | Pre-auth | Type | Sink |
+|---|----------|----------|------|------|
+| 1 | Critical | Yes | SQL injection (string-quoted) | `ObjectimmoRepository::getDistricts()` |
+| 2 | Critical | Yes | SQL injection (numeric context) | `ObjectimmoRepository::getAllObjectsBySearch()` |
+| 3 | Low | Yes | IDOR (public detail records) | `RealtyManagerController::detailAction()` |
+
+---
+
+## Finding 1 — Pre-auth SQL injection via `cityId` (ajaxselectdistrict)  [CRITICAL]
+
+- **PRE-AUTH:** Yes (public FE plugin action).
+- **Source:** `Classes/Controller/RealtyManagerController.php:240`
+  `$cityId = isset($_GET['cityId']) ? $_GET['cityId'] : 0;`
+- **Sink:** `Classes/Domain/Repository/ObjectimmoRepository.php:170-176`
+
+```php
+public function getDistricts($city_id) {
+    $sql = "SELECT uid, title from tx_realtymanager_domain_model_districts
+            WHERE city = '".$city_id."' order by title";
+    $districts = $connection->executeQuery($sql)->fetchAll();
+```
+
+- **Tainted path:** `$_GET['cityId']` → `ajaxselectdistrictAction()` → `getDistricts($cityId)`
+  → concatenated **inside single quotes** in raw SQL → `executeQuery()`. No cast, no
+  quoting, no `createNamedParameter`.
+- **Exploitability:** Trivial. The value sits in a quoted string context, so a single
+  quote breaks out. UNION-based extraction works directly (query selects `uid, title`,
+  2 columns).
+- **PoC:**
+  ```
+  /index.php?id=<pluginPageId>
+    &tx_realtymanager_immobilienmanager[controller]=RealtyManager
+    &tx_realtymanager_immobilienmanager[action]=ajaxselectdistrict
+    &cityId=0' UNION SELECT username,password FROM be_users-- -
+  ```
+  Rendered into the `Ajaxselectdistrict.html` option list → data exfiltration
+  (e.g. `be_users` / `fe_users` hashes). Also usable blind (`0' AND SLEEP(5)-- -`).
+
+---
+
+## Finding 2 — Pre-auth SQL injection in search filter (search/list/ajaxsearch)  [CRITICAL]
+
+- **PRE-AUTH:** Yes (public FE plugin actions `search`, `list`, `ajaxsearch`).
+- **Source:** `RealtyManagerController.php:131/157/175` `$form_data = $this->request->getArguments();`
+  plus `:179-180` `$form_data['district'] = $_POST['district'];`
+- **Sink:** `ObjectimmoRepository.php:23-77` (`getAllObjectsBySearch`)
+
+```php
+$house_type = isset($form_data['house_type']) ? $form_data['house_type'] : 0;
+...
+if($house_type > 0) {$add_where .= ' AND house_type = '.$house_type.'';}
+if($apartment_type > 0){$add_where .= ' AND apartment_type = '.$apartment_type.'';}
+if($employer_page > 0){$add_where .= ' AND obj.pid = '.$employer_page.'';}
+if ($city > 0) {$add_where .= ' AND city = '.$city.'';}
+if ($district > 0){$add_where .= ' AND district = '.$district.'';}
+...
+$sql = "SELECT ... WHERE ... $add_where ORDER BY obj.uid DESC $add_limit";
+$objects = $connection->executeQuery($sql)->fetchAll();
+```
+
+- **Tainted params:** `house_type`, `apartment_type`, `employer`, `city`, `district`
+  are concatenated **with no numeric cast and no quoting** (unlike `rent_*` /
+  `living_area_*`, which are guarded by `is_numeric()`). `district` is additionally
+  taken straight from `$_POST['district']`.
+- **Guard bypass:** The only gate is `if($city > 0)`. Under PHP's loose comparison a
+  payload beginning with a digit (e.g. `1 AND ...` / `1) UNION ...`) satisfies
+  `<string> > 0` in both PHP 7 (numeric leading `1`) and PHP 8 (string compare
+  `"1..." > "0"`), so tainted text passes through into the WHERE clause.
+- **Exploitability:** Numeric injection context (no quotes to escape). UNION/boolean/
+  time-based all viable; the SELECT is `SELECT *,...` so column count is large — blind
+  boolean/time-based is the reliable route.
+- **PoC (time-based, via search action):**
+  ```
+  /index.php?id=<pluginPageId>
+    &tx_realtymanager_immobilienmanager[controller]=RealtyManager
+    &tx_realtymanager_immobilienmanager[action]=search
+    &tx_realtymanager_immobilienmanager[city]=1 AND (SELECT 1 FROM (SELECT SLEEP(5))x)
+  ```
+  or via `ajaxsearch` with POST body `district=1 AND SLEEP(5)`.
+
+Note: search parameters are also persisted into the FE session
+(`fe_user->setKey('ses','search'/'ajaxsearch', $form_data)`) and re-read on paging,
+so the payload re-executes on subsequent `ajaxsearch` page requests.
+
+---
+
+## Finding 3 — IDOR on detailAction (LOW / informational)
+
+- `detailAction(Objectimmo $objUid)` (`:252`) resolves an arbitrary object `uid`
+  supplied by the visitor and also loads its `pid`-based employer record. There is no
+  ownership/visibility check beyond Extbase's storage-pid enforcement. Because listings
+  are public content this is largely informational, but a visitor can address objects
+  outside the configured display context by uid. Related raw-concat queries
+  `getImages($uid)` (`:92`) and `getEmployer($pid)` (`:82`) receive values from the
+  validated `Objectimmo` model (integer uid/pid from DB), so they are **not**
+  independently injectable from the request.
+
+---
+
+## Not vulnerable / false positives
+
+- `Classes/ViewHelpers/*ViewHelper.php` — all use `->createNamedParameter()` /
+  `\PDO::PARAM_INT`; parameterized, safe.
+- `getPidEmployer`, `getObject`, `getRealitionUid`, `getFileUid` — QueryBuilder with
+  named parameters; safe.
+- `PaginationAjax/PerPage.php` — `$_GET['page']` is only ever used in **arithmetic**
+  contexts (`$_GET["page"]-1`, comparisons); numeric coercion prevents XSS/SQLi.
+- Import path (`OpenImmoImport`, `XmlConverter`) — backend scheduler task, not
+  request-reachable pre-auth. The raw-concat methods there (`checkOwnerAnid`,
+  `setNewObject`, `clearSysFiles`) are fed from parsed OpenImmo XML during import, not
+  from HTTP requests.
+
+## Advisory cross-reference
+
+No published TYPO3 security advisory (TYPO3-EXT-SA) was identified for this extension;
+Findings 1 and 2 appear to be previously unreported. Remediation: use
+`createNamedParameter()` / `(int)` casts for every request-derived value in
+`ObjectimmoRepository`.
+
 ### cundd_rest
 
 #### Security Audit — `cundd/rest` (TYPO3 REST API extension)
@@ -1152,6 +1613,90 @@ in this codebase, and the fixes are visible in-source:
 Administrators should still track the vendor's security releases, but 9.0.1 carries no outstanding
 known vulnerability.
 
+### directmailteam_direct-mail
+
+#### Security Audit — `directmailteam/direct-mail` (v9.5.2)
+
+Official TYPO3 direct-mail extension. CodeQL flagged 9 SQL-injection candidates.
+Scope: **pre-authentication** surface = frontend jumpUrl / click-tracking middleware and
+the FE-rendering hook. Backend modules (BE-login required) noted but out of pre-auth scope.
+
+## Summary
+
+**No pre-auth vulnerability found.** The frontend jumpUrl auth-code check is implemented
+correctly, all request-reachable SQL is parameterized, and the group-simulation hook is
+token-gated. The 9 CodeQL SQLi candidates are backend-module code (BE-auth required) using
+bound parameters / int casts. This 9.5.2 release already contains the fixes for the
+historical direct_mail advisories.
+
+| # | Area | Severity | Pre-auth | Result |
+|---|------|----------|----------|--------|
+| 1 | jumpUrl authCode validation | — | YES | Correct; no bypass |
+| 2 | 9 CodeQL SQLi candidates | Info | No | Backend-only, parameterized/int — not injectable |
+| 3 | FE `simulateUsergroup` hook | — | (n/a) | Random-token gated; safe |
+
+---
+
+## 1 — jumpUrl authCode validation is correct (no bypass)
+
+`Classes/Middleware/JumpurlController.php:81-155`. Request params `mid` (cast `(int)`,
+line 87), `rid`, `aC`, `jumpurl`. `shouldProcess()` (line 162) additionally requires `mid`
+to be integer. The auth check uses a proper boolean helper and throws on failure:
+
+```php
+$valid = AuthCodeUtility::validateAuthCode($submittedAuthCode, $this->recipientRecord,
+             ($this->directMailRecord['authcode_fieldList'] ?: 'uid'));
+if (!$valid) { throw new \Exception('authCode verification failed.', 1376899631); }
+```
+
+`AuthCodeUtility::validateAuthCode()` (`Classes/Utility/AuthCodeUtility.php`) returns true
+only when a non-empty submitted code equals the HMAC (or legacy `stdAuthCode`) of the
+recipient record; empty/wrong codes return false → exception. Correct polarity — this is
+exactly what the `azich` fork got inverted. No recipient enumeration, no bypass.
+
+`performFeUserAutoLogin()` (`:304-317`) here correctly checks `=== 'fe_users'`
+(constant `RECIPIENT_TABLE_FEUSER = 'fe_users'`, line 42), so it is live — but it is only
+reachable *after* a valid auth code, and further requires the site admin to have put
+`password` into `authcode_fieldList`. Not pre-auth.
+
+## 2 — CodeQL SQLi candidates: backend-only, parameterized (NOT injectable)
+
+Pre-auth path SQL, all bound:
+- `SysDmailRepository::selectForJumpurl` (`:275-290`) — `createNamedParameter($mailId, Connection::PARAM_INT)`.
+- `TtAddressRepository::getRawRecord` / `FeUsersRepository::getRawRecord` — `(int)$uid`, `createNamedParameter(..., PARAM_INT)`.
+- `SysDmailMaillogRepository::hasRecentLog` (`:569+`) — every predicate `createNamedParameter`; `insertForJumpurl` uses typed array `insert()`.
+- `initRecipientRecord` (`JumpurlController.php:215-237`) — table chosen from fixed `t`/`f` switch; only `(int)$recipientUid` reaches the query.
+
+The 9 flagged raw-string `WHERE` sinks are in **backend components requiring a valid BE
+login**, and the interpolated values are DB-config or int-cast, not request text:
+- `Classes/Repository/TempRepository.php:290` — `sys_dmail_category.pid IN (` + `createNamedParameter($pidList)`; `:327` `pid=' . (int)$row['pid']`.
+- `Classes/Repository/FeGroupsRepository.php:230` — `INSTR(... ',' . $groupId . ',')` where `$groupId` is an int uid from BE module iteration.
+- Remaining candidates in `Classes/Module/*Controller.php` / `DmQueryGenerator.php` — BE modules, int-guarded.
+
+None are reachable by an unauthenticated request. `FeGroupsRepository.php:230` and
+`TempRepository.php:290/327` are minor hardening candidates (prefer full binding) but are
+not attacker-tainted.
+
+## 3 — FE `simulateUsergroup` hook (safe)
+
+`Classes/Hooks/TypoScriptFrontendController.php:34-51` reads `dmail_fe_group` +
+`access_token`, gated by `DmRegistryUtility::validateAndRemoveAccessToken()` — strict
+compare against a single-use `Random::generateRandomHexString(32)` in the registry. No
+bypass.
+
+## Known CVEs / advisories (cross-reference)
+
+- **TYPO3-EXT-SA-2020-005** (**CVE-2020-12699** jumpUrl Open Redirect; **CVE-2020-12700**
+  CSV "special query" information disclosure), fixed in 5.2.4. **v9.5.2 post-dates these**:
+  jumpUrl targets come from the stored mail's `absRef` protected by a recomputed `juHash`
+  (`:149-152`), `isAllowedJumpUrlTarget` (`:339-357`) rejects arbitrary valid URLs, and the
+  authCode gate is intact — so both issues are remediated in this release. No residual or
+  new pre-auth issue observed.
+
+Sources:
+- https://typo3.org/security/advisory/typo3-ext-sa-2020-005
+- https://advisories.gitlab.com/pkg/composer/directmailteam/direct-mail/CVE-2020-12699/
+
 ### dmitryd_typo3-dd-googlesitemap
 
 #### Security Audit — dmitryd/dd_googlesitemap v2.3.2
@@ -1192,6 +1737,213 @@ Version 2.3.2 is a **patched** release. Every request-derived value that reaches
 - v2.3.2 (2014-era) already contains the `MathUtility::canBeInterpretedAsInteger()` guard on `L` and `intExplode()` on `pidList` — i.e. it post-dates the dd_googlesitemap SQL-injection fixes. No known unpatched advisory applies to the eID sinks in this release.
 
 **Verdict: no actionable vulnerability. The juicy SQLi target is already patched in 2.3.2.**
+
+### dmk_t3socials
+
+#### Security Audit — dmk/t3socials (T3 Socials) v3.0.1
+
+TYPO3 extension that posts records (e.g. tt_news) to social networks (Twitter, Facebook,
+Xing, pushd, HybridAuth). Mixed legacy (`tx_t3socials_*`, rnbase) + modern namespaced
+backend FormEngine element. Entry points: TCEmain hooks (backend save), a backend AJAX
+handler, and one **frontend eID** endpoint (`t3socials-hybridauth`).
+
+## Summary
+
+**No pre-auth code/command injection, SSRF, or object-injection bug was confirmed.**
+CodeQL's 9 "code/command injection" candidates are **false positives**: every dynamic
+callable/instantiation resolves a **class name from network configuration stored in the
+database by a backend editor**, not from an HTTP request, and passes it to
+`tx_rnbase::makeInstance()` (an object factory — not `call_user_func`/`exec`/`eval`).
+There is no `shell_exec`/`system`/`eval`/`call_user_func`/`unserialize` on any tainted
+path (grep-verified). The one genuine unauthenticated attack surface is the HybridAuth
+eID endpoint, whose own parameters are integer-cast; residual risk lives in the bundled,
+outdated `Hybrid/*` OAuth library rather than in this extension's code.
+
+| Candidate class | Pre-auth | Verdict |
+|-----------------|----------|---------|
+| Code/command injection (9 CodeQL hits) | — | **False positive** (config-sourced class name → `makeInstance`) |
+| SSRF (pushd `file_get_contents`) | No | Not exploitable (URL from backend config) |
+| Object injection | — | N/A (no `unserialize` of request data) |
+| Pre-auth eID (`t3socials-hybridauth`) | Yes | Attack surface; params int-cast; see note |
+
+---
+
+## CodeQL "code/command injection" candidates — verified FALSE POSITIVES
+
+The flagged sinks are dynamic class instantiations, e.g.:
+
+- `network/pushd/class.tx_t3socials_network_pushd_Connection.php:124-127`
+  ```php
+  $builderClass = $network->getConfigData('pushd.'.$messageType.'.builder');
+  $builderClass = $builderClass ? $builderClass : 'tx_t3socials_network_pushd_MessageBuilder';
+  return tx_rnbase::makeInstance($builderClass);
+  ```
+- `ext_localconf.php:11-22` `tx_t3socials_network_Config::registerNetwork('tx_t3socials_network_*_NetworkConfig')` — **string literals**.
+- `network/class.tx_t3socials_network_Config.php` / service registry — instantiate the
+  registered network config/connection **class names**.
+
+**Why FP:** `$builderClass` / network class names come from
+`Network->getConfigData(...)` — i.e. the `tx_t3socials_networks` record's config field,
+editable only by an authenticated backend user with access to that table. The value is
+passed to `makeInstance()` (a `new`-style object factory), **not** to a command or code
+evaluator. There is no request→sink path, and no OS command / eval is ever built. The
+only `exec` token in the codebase is a literal empty service-registration key
+(`ext_localconf.php:68 'exec' => ''`). Not exploitable.
+
+---
+
+## SSRF (pushd) — not exploitable
+
+- `network/pushd/class.tx_t3socials_network_pushd_Connection.php:84,98,150-152`
+  ```php
+  $url = $this->getNetwork()->getConfigData('pushd.url');
+  $url .= 'event/'.$event;
+  $result = file_get_contents($url, false, $context);
+  ```
+- The base `$url` is the backend-configured `pushd.url`. `$event` derives from the
+  message type / builder output (record-driven, backend), not from an unauthenticated
+  request. No user-controlled host reaches `file_get_contents`. Similar for
+  `network/hybridauth/.../OAuthCall.php:132` (`getURL` of a fixed template path on disk).
+  Not a pre-auth SSRF.
+
+---
+
+## Pre-auth eID `t3socials-hybridauth` — attack surface (no concrete bug in ext code)
+
+- **PRE-AUTH:** Yes. `network/hybridauth/class.tx_t3socials_network_hybridauth_OAuthCall.php:192`
+  dispatches on `eID=t3socials-hybridauth`; `eID()` → `oAuthCall()`.
+- Parameters: `network` is `(int)`-cast (`:109`), `oAuthCallType` is matched against
+  fixed constants (`state`/`logout`/`authenticate`). The network must already exist and
+  be configured. So the extension's own handling is type-safe.
+- Residual concerns (not confirmed exploitable, config-dependent):
+  - `type=authenticate` calls `Hybrid_Endpoint::process()` from the **bundled
+    `lib/hybridauth/`** library (an old HybridAuth 2.x snapshot). Historic HybridAuth
+    OpenID discovery has SSRF/redirect issues; if an OpenID-type network is enabled this
+    surface is inherited. This is a third-party-library exposure, not a flaw in
+    dmk_t3socials code.
+  - `oAuthCall()` catch block (`:179`) reflects `$e->getMessage()` inside
+    `alert("...")`. Exception text is internally generated (class names / config), not
+    directly attacker-set, so no reliable XSS was found — noted for completeness.
+
+---
+
+## Not vulnerable / other checks
+
+- No `unserialize`, `eval`, `assert`, `create_function`, `shell_exec`, `system`,
+  `passthru`, `proc_open`, or `call_user_func` on request data anywhere in the
+  extension code (grep-verified; excludes the bundled twitteroauth/hybridauth vendor
+  libs and tests).
+- TCEmain hooks (`hooks/class.tx_t3socials_hooks_TCEHook.php`) and the BE AJAX handler
+  (`OAuthCall->ajaxId`, registered with `false` = requires BE) are backend/authenticated.
+- Bundled vendor libraries under `lib/hybridauth/`, `network/twitter/twitteroauth/`
+  are outdated and out of scope for this extension's own code, but should be treated as
+  supply-chain risk if the HybridAuth flows are enabled.
+
+## Advisory cross-reference
+
+No specific published TYPO3-EXT-SA identified for dmk_t3socials 3.0.1. No pre-auth
+vulnerability confirmed in the extension's own code; recommend removing/upgrading the
+bundled HybridAuth library if the eID OAuth flow is in use.
+
+### ecodev_tagpack
+
+#### Security Audit — ecodev/tagpack (Tag Pack) v0.13.0
+
+Legacy TYPO3 4.x-era tagging extension (uses `tslib_pibase`, `t3lib_div`,
+`$GLOBALS['TYPO3_DB']`, `PATH_tslib`). Frontend plugins `pi1` (tag cloud / search box),
+`pi2` (stub "Hello World"), `pi3` (tag nominations / result list); plus a standalone
+backend AJAX search endpoint and TCEforms/TCEmain hooks.
+
+## Summary
+
+One **pre-auth reflected XSS** confirmed in the `pi1` frontend plugin. The frontend
+SQL paths are **not** injectable (integer-explode / `fullQuoteStr` used consistently).
+The AJAX search server contains a real SQL injection but it is **backend
+(authenticated) only**. `unserialize($_EXTCONF)` is admin-config sourced (not a
+request). Net: CodeQL's SQL sinks in the FE plugins are largely false positives for
+SQLi; the genuine request-reachable bug is XSS.
+
+| # | Severity | Pre-auth | Type | Location |
+|---|----------|----------|------|----------|
+| 1 | Medium | Yes | Reflected XSS | `pi1/class.tx_tagpack_pi1.php` (search box / calendar) |
+| 2 | Medium | No (BE auth) | SQL injection | `class.tx_tagpack_ajaxsearch_server.php:102` |
+
+---
+
+## Finding 1 — Pre-auth reflected XSS in pi1 search box / calendar  [MEDIUM]
+
+- **PRE-AUTH:** Yes (frontend `list_type` plugin `tagpack_pi1`).
+- **Source:** `$this->piVars[...]` (= `t3lib_div::_GPmerged('tx_tagpack_pi1')`, unsanitized
+  GET/POST) and `t3lib_div::_GET($parameter)`.
+- **Sinks (HTML attribute value, no `htmlspecialchars`):**
+  - `pi1/class.tx_tagpack_pi1.php:321` — `... value="' . $this->piVars['searchWord'] . '" ...`
+  - `:302` — generic loop echoing **every** `piVars` key/value into `value="..."`
+  - `:366` / `:367` — `value="' . $this->piVars['from'] . '"` / `['to']`
+  - `:316` / `:361` / `:312` / `:357` — `value="' . t3lib_div::_GET($parameter) . '"` (keepGetVars)
+
+```php
+$searchBox .= '... name="'.$this->prefixId.'[searchWord]" ... value="'
+            . $this->piVars['searchWord'] . '" size="20" /></label>';
+```
+
+- **Tainted path:** `GET tx_tagpack_pi1[searchWord]` → `piVars['searchWord']` →
+  `makeSearchBox()` → concatenated into an `<input value="...">` with no encoding →
+  echoed to the page.
+- **Exploitability:** Classic attribute-breakout reflected XSS. Rendered whenever the
+  plugin's `searchBox` (or `calendar`) is enabled via TypoScript. The generic
+  `foreach ($this->piVars ...)` at `:302`/`:347` reflects arbitrary extra parameters
+  too.
+- **PoC:**
+  ```
+  /index.php?id=<pi1PageId>&tx_tagpack_pi1[searchWord]="><script>alert(document.cookie)</script>
+  ```
+- **Caveat:** TYPO3 4.x-only extension; on that platform GET/POST are not auto-encoded,
+  so the reflection is live. Fix: wrap every reflected value in `htmlspecialchars()`.
+
+---
+
+## Finding 2 — SQL injection in AJAX search server (BACKEND, authenticated)  [MEDIUM, not pre-auth]
+
+- **PRE-AUTH:** No. `class.tx_tagpack_ajaxsearch_server.php:49` does
+  `require_once($BACK_PATH.'init.php')` and the code relies on
+  `$GLOBALS['BE_USER']->isAdmin()` / `->getPagePermsClause()` / `->check()` — it runs in
+  an authenticated backend context.
+- **Sink:** `:102`
+  ```php
+  $fieldConfig[...]['additionalWhere'] = 'tx_tagpack_tags.pid IN(' . $request['pid'] . ')';
+  ```
+  fed to `exec_SELECTquery()` at `:224/:262/:275` via `join(' AND ', $conditions)`.
+- **Tainted path:** `$_GET['pid']` (`main(t3lib_div::_GET())` at `:414`) → raw concat into
+  WHERE. Also `$request['id']` / `$request['value']` (search term via
+  `$this->db->searchQuery()`).
+- **Assessment:** Real injection but requires a valid BE session, so it is a
+  privilege-limited authenticated finding, not the requested pre-auth class. Worth
+  fixing (cast `pid` to an int list) but low practical risk.
+
+---
+
+## Not vulnerable / false positives
+
+- **pi3 (`uid IN(...)`)** — `pi3:56-67`: `$tagUid` derives from
+  `t3lib_div::intExplode(',', piVars['uid'])` then `implode` → integers only. Safe.
+  The `$table` values in dynamic SQL come from TypoScript `$conf` (admin), not request.
+- **pi1 SQL (`searchWord`)** — `pi1:96/136`: wrapped in
+  `$GLOBALS['TYPO3_DB']->fullQuoteStr(...)`; other numeric filters use `intval()`.
+  Not SQL-injectable.
+- **`pi3` date filters** — `strtotime()` coerced. Safe.
+- **`ext_localconf.php:6` `unserialize($_EXTCONF)`** — `$_EXTCONF` is the extension
+  configuration blob (admin-managed), not attacker input → not a request-reachable
+  object-injection. False positive for a pre-auth deserialization bug.
+- **pi2** — returns a static "Hello World" debug dump; no user data in SQL/HTML sink.
+- **`mod1/index.php`, `class.tx_tagpack_tceforms_addtags.php`** — backend module /
+  TCEforms hooks; not pre-auth. `exec_UPDATEquery`/`exec_INSERTquery` there operate on
+  backend-edited records.
+
+## Advisory cross-reference
+
+No specific published TYPO3-EXT-SA identified. The extension targets end-of-life
+TYPO3 4.x and is itself long unmaintained (v0.13.0); the pi1 reflected XSS is the only
+request-reachable, unauthenticated issue.
 
 ### extcode_cart
 
@@ -2324,7 +3076,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 443 raw -> 401 after noise filter
+# 485 raw -> 434 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22
@@ -2337,6 +3089,9 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:393
 [CRIT] Server-side request  gdpr-extensions-com_gdpr-ext Classes/Controller/GdprManagerController.php:656
 [CRIT] Server-side request  gdpr-extensions-com_gdpr-ext Classes/Controller/GdprManagerController.php:687
+[CRIT] Unsafe deserializati jakota_formhandler           Classes/Controller/AdministrationController.php:40
+[CRIT] Unsafe deserializati jakota_formhandler           Classes/Controller/AdministrationController.php:85
+[CRIT] Unsafe deserializati jakota_formhandler           Classes/Controller/AdministrationController.php:159
 [XSS ] Reflected XSS        ehaerer_eh-bootstrap         Classes/Eid/ExtbaseDispatcher.php:155
 [XSS ] Reflected XSS        bytebuilders_t3clickmark     Classes/Middleware/InjectWidgetMiddleware.php:85
 [CRIT] Code injection       adgrafik_fal-ftp             Resources/Private/Script/.FalFtpRemoteService.php:18
@@ -2363,7 +3118,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/GroupingComponent.php:44
 [CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/HighlightingComponent.php:36
 [CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/RelevanceComponent.php:46
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/SpellcheckingComponent.php:37
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/SortingComponent.php:66
-[CRIT] SQL injection        apache-solr-for-typo3_solr   Classes/Search/StatisticsComponent.php:53
 ```
