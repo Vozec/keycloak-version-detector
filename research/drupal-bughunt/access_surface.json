@@ -1,0 +1,2072 @@
+[
+{
+"mod": "comment_notify",
+"kind": "route",
+"route": "comment_notify.disable",
+"path": "/comment_notify/disable/{hash}",
+"target": "\\Drupal\\comment_notify\\Controller\\CommentNotifyController::disable",
+"access": "access content",
+"write": false,
+"file": "comment_notify/comment_notify.routing.yml"
+},
+{
+"mod": "semantic_search",
+"kind": "route",
+"route": "semantic_search.search_form",
+"path": "/admin/config/search/semantic_search/search",
+"target": "path: ",
+"access": "access content",
+"write": false,
+"file": "semantic_search/semantic_search.routing.yml"
+},
+{
+"mod": "honeypot",
+"kind": "route",
+"route": "honeypot_test.submit_form",
+"path": "/honeypot_test/submit_form",
+"target": "\\Drupal\\honeypot_test\\Controller\\HoneypotTestController::submitFormPage",
+"access": "TRUE",
+"write": false,
+"file": "honeypot/tests/modules/honeypot_test/honeypot_test.routing.yml"
+},
+{
+"mod": "metatag",
+"kind": "route",
+"route": "metatag_test_custom_route.test",
+"path": "/metatag_test_custom_route",
+"target": "\\Drupal\\metatag_test_custom_route\\Controller\\MetatagTestCustomRouteController::test",
+"access": "access content",
+"write": false,
+"file": "metatag/tests/modules/metatag_test_custom_route/metatag_test_custom_route.routing.yml"
+},
+{
+"mod": "migrate_plus",
+"kind": "route",
+"route": "migrate_plus_http_test.json_first",
+"path": "/migrate-plus-http-test/json-first",
+"target": "\\Drupal\\migrate_plus_http_test\\Controller\\HttpResponses::content",
+"access": "access content",
+"write": false,
+"file": "migrate_plus/tests/modules/migrate_plus_http_test/migrate_plus_http_test.routing.yml"
+},
+{
+"mod": "migrate_plus",
+"kind": "route",
+"route": "migrate_plus_http_test.json_second",
+"path": "/migrate-plus-http-test/json-second",
+"target": "\\Drupal\\migrate_plus_http_test\\Controller\\HttpResponses::second",
+"access": "access content",
+"write": false,
+"file": "migrate_plus/tests/modules/migrate_plus_http_test/migrate_plus_http_test.routing.yml"
+},
+{
+"mod": "migrate_plus",
+"kind": "route",
+"route": "migrate_plus_http_test.json_third",
+"path": "/migrate-plus-http-test/json-third",
+"target": "\\Drupal\\migrate_plus_http_test\\Controller\\HttpResponses::third",
+"access": "access content",
+"write": false,
+"file": "migrate_plus/tests/modules/migrate_plus_http_test/migrate_plus_http_test.routing.yml"
+},
+{
+"mod": "migrate_plus",
+"kind": "route",
+"route": "migrate_plus_http_test.json_fourth",
+"path": "/migrate-plus-http-test/json-fourth",
+"target": "\\Drupal\\migrate_plus_http_test\\Controller\\HttpResponses::fourth",
+"access": "access content",
+"write": false,
+"file": "migrate_plus/tests/modules/migrate_plus_http_test/migrate_plus_http_test.routing.yml"
+},
+{
+"mod": "migrate_plus",
+"kind": "route",
+"route": "migrate_plus_http_test.json_fifth",
+"path": "/migrate-plus-http-test/json-fifth",
+"target": "\\Drupal\\migrate_plus_http_test\\Controller\\HttpResponses::fifth",
+"access": "access content",
+"write": false,
+"file": "migrate_plus/tests/modules/migrate_plus_http_test/migrate_plus_http_test.routing.yml"
+},
+{
+"mod": "adsense",
+"kind": "route",
+"route": "adsense_cse.results",
+"path": "/adsense/cse",
+"target": "\\Drupal\\adsense\\Controller\\CseResultsController::display",
+"access": "TRUE",
+"write": false,
+"file": "adsense/adsense.routing.yml"
+},
+{
+"mod": "adsense",
+"kind": "route",
+"route": "adsense_csev2.results",
+"path": "/csev2/results/{slot}",
+"target": "\\Drupal\\adsense\\Controller\\CseV2ResultsController::display",
+"access": "TRUE",
+"write": false,
+"file": "adsense/adsense.routing.yml"
+},
+{
+"mod": "adsense",
+"kind": "route",
+"route": "adsense_adstxt.page",
+"path": "/ads.txt",
+"target": "\\Drupal\\adsense_adstxt\\Controller\\AdsenseAdsTxtController::display",
+"access": "TRUE",
+"write": false,
+"file": "adsense/adstxt/adsense_adstxt.routing.yml"
+},
+{
+"mod": "mailchimp",
+"kind": "route",
+"route": "mailchimp.webhook_endpoint",
+"path": "mailchimp/webhook/{hash}",
+"target": "\\Drupal\\mailchimp\\Controller\\MailchimpWebhookController::endpoint",
+"access": "TRUE",
+"write": false,
+"file": "mailchimp/mailchimp.routing.yml"
+},
+{
+"mod": "seckit",
+"kind": "route",
+"route": "seckit.report",
+"path": "/report-csp-violation",
+"target": "\\Drupal\\seckit\\Controller\\SeckitExportController::export",
+"access": "TRUE",
+"write": false,
+"file": "seckit/seckit.routing.yml"
+},
+{
+"mod": "services",
+"kind": "route",
+"route": "services.csrf_token",
+"path": "/services/session/token",
+"target": "\\Drupal\\services\\Controller\\Services::csrfToken",
+"access": "TRUE",
+"write": false,
+"file": "services/services.routing.yml"
+},
+{
+"mod": "select2",
+"kind": "route",
+"route": "select2.entity_autocomplete",
+"path": "/select2_autocomplete/{target_type}/{selection_handler}/{selection_settings_key}",
+"target": "\\Drupal\\select2\\Controller\\EntityAutocompleteController::handleAutocomplete",
+"access": "TRUE",
+"write": false,
+"file": "select2/select2.routing.yml"
+},
+{
+"mod": "select2",
+"kind": "route",
+"route": "select2_facets.facet_autocomplete",
+"path": "/select2_facets_autocomplete/{facetsource_id}/{facet_id}/{selection_settings_key}",
+"target": "\\Drupal\\select2_facets\\Controller\\FacetApiAutocompleteController::handleAutocomplete",
+"access": "TRUE",
+"write": false,
+"file": "select2/modules/select2_facets/select2_facets.routing.yml"
+},
+{
+"mod": "select2",
+"kind": "route",
+"route": "select2_form_test.optgroup",
+"path": "/select2-optgroup-form",
+"target": "\\Drupal\\select2_form_test\\Form\\Select2OptgroupForm",
+"access": "TRUE",
+"write": false,
+"file": "select2/tests/modules/select2_form_test/select2_form_test.routing.yml"
+},
+{
+"mod": "select2",
+"kind": "route",
+"route": "select2_form_test.ajax",
+"path": "/select2-ajax-form",
+"target": "\\Drupal\\select2_form_test\\Form\\Select2AjaxForm",
+"access": "TRUE",
+"write": false,
+"file": "select2/tests/modules/select2_form_test/select2_form_test.routing.yml"
+},
+{
+"mod": "select2",
+"kind": "route",
+"route": "select2_form_test.autocomplete",
+"path": "/select2-autocomplete-form",
+"target": "\\Drupal\\select2_form_test\\Form\\Select2AutocompleteForm",
+"access": "TRUE",
+"write": false,
+"file": "select2/tests/modules/select2_form_test/select2_form_test.routing.yml"
+},
+{
+"mod": "google_analytics",
+"kind": "route",
+"route": "google_analytics_test.drupal_messenger_add_message",
+"path": "/google-analytics-test/drupal-messenger-add-message",
+"target": "\\Drupal\\google_analytics_test\\Controller\\GoogleAnalyticsTestController::drupalAddMessageTest",
+"access": "TRUE",
+"write": false,
+"file": "google_analytics/tests/modules/google_analytics_test/google_analytics_test.routing.yml"
+},
+{
+"mod": "currency",
+"kind": "route",
+"route": "currency_test.currency_amount_element",
+"path": "/currency_test-form-element-currency-amount/{minimum_amount}/{maximum_amount}/{currency_code}",
+"target": "\\Drupal\\currency_test\\CurrencyAmountElement",
+"access": "TRUE",
+"write": false,
+"file": "currency/modules/currency_test/currency_test.routing.yml"
+},
+{
+"mod": "currency",
+"kind": "route",
+"route": "currency_test.currency_sign_element",
+"path": "/currency_test-form-element-currency-sign/{currency_code}/{currency_sign}",
+"target": "\\Drupal\\currency_test\\CurrencySignElement",
+"access": "TRUE",
+"write": false,
+"file": "currency/modules/currency_test/currency_test.routing.yml"
+},
+{
+"mod": "jwt",
+"kind": "route",
+"route": "jwt_oauth_ccf.token",
+"path": "/oauth2/token",
+"target": "\\Drupal\\jwt_oauth_ccf\\Controller\\TokenController::token",
+"access": "TRUE",
+"write": true,
+"file": "jwt/modules/jwt_oauth_ccf/jwt_oauth_ccf.routing.yml"
+},
+{
+"mod": "jwt",
+"kind": "route",
+"route": "jwt_oauth_ccf.client_list",
+"path": "/user/{user}/oauth-clients",
+"target": "\\Drupal\\jwt_oauth_ccf\\Controller\\ClientListController::listClients",
+"access": "TRUE",
+"write": false,
+"file": "jwt/modules/jwt_oauth_ccf/jwt_oauth_ccf.routing.yml"
+},
+{
+"mod": "jwt",
+"kind": "route",
+"route": "jwt_oauth_ccf.client_generate",
+"path": "/user/{user}/oauth-clients/generate",
+"target": "\\Drupal\\jwt_oauth_ccf\\Form\\GenerateClientForm",
+"access": "TRUE",
+"write": false,
+"file": "jwt/modules/jwt_oauth_ccf/jwt_oauth_ccf.routing.yml"
+},
+{
+"mod": "jwt",
+"kind": "route",
+"route": "jwt_oauth_ccf.client_delete",
+"path": "/user/{user}/oauth-clients/{client_id}/delete",
+"target": "\\Drupal\\jwt_oauth_ccf\\Form\\ClientDeleteForm",
+"access": "TRUE",
+"write": false,
+"file": "jwt/modules/jwt_oauth_ccf/jwt_oauth_ccf.routing.yml"
+},
+{
+"mod": "jwt",
+"kind": "route",
+"route": "jwt_test.10",
+"path": "/jwt_test/test10",
+"target": "\\Drupal\\jwt_test\\Controller\\TestContent::test1",
+"access": "TRUE",
+"write": false,
+"file": "jwt/tests/modules/jwt_test/jwt_test.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "entity.feeds_feed.receive",
+"path": "/feed/{feeds_subscription}/{feeds_push_token}/push_callback",
+"target": "Drupal\\feeds\\Controller\\SubscriptionController::receive",
+"access": "TRUE",
+"write": true,
+"file": "feeds/feeds.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "entity.feeds_feed.subscribe",
+"path": "/feed/{feeds_subscription_id}/{feeds_push_token}/push_callback",
+"target": "Drupal\\feeds\\Controller\\SubscriptionController::subscribe",
+"access": "TRUE",
+"write": false,
+"file": "feeds/feeds.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.files_csv",
+"path": "/testing/feeds/files.csv",
+"target": "Drupal\\feeds_test_files\\Controller\\CsvController::files",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.csv_images",
+"path": "/testing/feeds/images.csv",
+"target": "\\Drupal\\feeds_test_files\\Controller\\CsvController::generateMediaCsv",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.csv_documents",
+"path": "/testing/feeds/documents.csv",
+"target": "\\Drupal\\feeds_test_files\\Controller\\CsvController::generateMediaCsv",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.csv_audio",
+"path": "/testing/feeds/audio.csv",
+"target": "\\Drupal\\feeds_test_files\\Controller\\CsvController::generateMediaCsv",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.csv_video_local",
+"path": "/testing/feeds/video_local.csv",
+"target": "\\Drupal\\feeds_test_files\\Controller\\CsvController::generateMediaCsv",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.csv_video_remote",
+"path": "/testing/feeds/video_remote.csv",
+"target": "\\Drupal\\feeds_test_files\\Controller\\CsvController::generateMediaCsv",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.nodes_csv",
+"path": "/testing/feeds/nodes.csv",
+"target": "Drupal\\feeds_test_files\\Controller\\CsvController::nodes",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.http304",
+"path": "/testing/feeds/304.csv",
+"target": "Drupal\\feeds_test_files\\Controller\\CsvController::return304",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.non_existent_csv",
+"path": "/testing/feeds/files-404.csv",
+"target": "Drupal\\feeds_test_files\\Controller\\CsvController::files404",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "feeds_test_files.video",
+"path": "/testing/feeds/video",
+"target": "\\Drupal\\feeds_test_files\\Controller\\VideoController::serveVideo",
+"access": "access content",
+"write": false,
+"file": "feeds/tests/modules/feeds_test_files/feeds_test_files.routing.yml"
+},
+{
+"mod": "content_access",
+"kind": "route",
+"route": "entity.node.content_access",
+"path": "/node/{node}/access",
+"target": "\\Drupal\\content_access\\Form\\ContentAccessPageForm",
+"access": "TRUE",
+"write": false,
+"file": "content_access/content_access.routing.yml"
+},
+{
+"mod": "content_access",
+"kind": "route",
+"route": "entity.node_type.content_access_form",
+"path": "/admin/structure/types/manage/{node_type}/access",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "content_access/content_access.routing.yml"
+},
+{
+"mod": "chosen",
+"kind": "route",
+"route": "chosen.test",
+"path": "chosen-test",
+"target": "\\Drupal\\chosen_test\\Form\\ChosenTestForm",
+"access": "TRUE",
+"write": false,
+"file": "chosen/tests/modules/chosen_test/chosen_test.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.login",
+"path": "/caslogin",
+"target": "\\Drupal\\cas\\Controller\\ForceLoginController::forceLogin",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.legacy_login",
+"path": "/cas",
+"target": "\\Drupal\\cas\\Controller\\ForceLoginController::forceLogin",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.service",
+"path": "/casservice",
+"target": "\\Drupal\\cas\\Controller\\ServiceController::handle",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.proxyCallback",
+"path": "/casproxycallback",
+"target": "\\Drupal\\cas\\Controller\\ProxyCallbackController::callback",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.logout",
+"path": "/caslogout",
+"target": "\\Drupal\\cas\\Controller\\LogoutController::logout",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas_user_interaction_test.form",
+"path": "/cas-user-interaction-test",
+"target": "Drupal\\cas_user_interaction_test\\CasUserInteractionTestForm",
+"access": "TRUE",
+"write": false,
+"file": "cas/tests/modules/cas_user_interaction_test/cas_user_interaction_test.routing.yml"
+},
+{
+"mod": "bookmarks",
+"kind": "route",
+"route": "entity.user.bookmarks",
+"path": "/user/{user}/bookmarks",
+"target": "\\Drupal\\bookmarks\\Controller\\BookmarksController::build",
+"access": "TRUE",
+"write": false,
+"file": "bookmarks/bookmarks.routing.yml"
+},
+{
+"mod": "media_library_form_element",
+"kind": "route",
+"route": "media_library_form_element_test.config",
+"path": "/media-library-form-element-test-form",
+"target": "\\Drupal\\media_library_form_element_test\\Form\\TestForm",
+"access": "access content",
+"write": false,
+"file": "media_library_form_element/tests/modules/media_library_form_element_test/media_library_form_element_test.routing.yml"
+},
+{
+"mod": "social_auth",
+"kind": "route",
+"route": "social_auth.network.redirect",
+"path": "user/login/{network}",
+"target": "\\Drupal\\social_auth\\Controller\\OAuth2ControllerBase::redirectToProvider",
+"access": "TRUE",
+"write": false,
+"file": "social_auth/social_auth.routing.yml"
+},
+{
+"mod": "social_auth",
+"kind": "route",
+"route": "social_auth.network.callback",
+"path": "user/login/{network}/callback",
+"target": "\\Drupal\\social_auth\\Controller\\OAuth2ControllerBase::callback",
+"access": "TRUE",
+"write": false,
+"file": "social_auth/social_auth.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "oauth2_token.token",
+"path": "/oauth/token",
+"target": "Drupal\\simple_oauth\\Controller\\Oauth2Token::token",
+"access": "TRUE",
+"write": true,
+"file": "simple_oauth/simple_oauth.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "oauth2_token.authorize",
+"path": "/oauth/authorize",
+"target": "Drupal\\simple_oauth\\Controller\\Oauth2AuthorizeController::authorize",
+"access": "TRUE",
+"write": true,
+"file": "simple_oauth/simple_oauth.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "simple_oauth.jwks",
+"path": "/oauth/jwks",
+"target": "Drupal\\simple_oauth\\Controller\\Jwks::handle",
+"access": "TRUE",
+"write": false,
+"file": "simple_oauth/simple_oauth.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "oauth2_token.test_token",
+"path": "/oauth/test",
+"target": "\\Drupal\\simple_oauth_test\\Controller\\RedirectDebug::token",
+"access": "TRUE",
+"write": false,
+"file": "simple_oauth/tests/modules/simple_oauth_test/simple_oauth_test.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "oauth2_resource.test",
+"path": "/api/oauth-resource-test",
+"target": "\\Drupal\\simple_oauth_test\\Controller\\Resource::get",
+"access": "access content",
+"write": false,
+"file": "simple_oauth/tests/modules/simple_oauth_test/simple_oauth_test.routing.yml"
+},
+{
+"mod": "flag",
+"kind": "route",
+"route": "flag_twig_test.test_page",
+"path": "/flag-test-page/{node}",
+"target": "\\Drupal\\flag_twig_test\\Controller\\FlagTwigTestController::render",
+"access": "access content",
+"write": false,
+"file": "flag/tests/modules/flag_twig_test/flag_twig_test.routing.yml"
+},
+{
+"mod": "flag",
+"kind": "route",
+"route": "flag_link_test.page",
+"path": "/flag-link-test/{entity_type_id}/{entity_id}/{flag}",
+"target": "\\Drupal\\flag_link_test\\Controller\\FlagLinkTest::page",
+"access": "TRUE",
+"write": false,
+"file": "flag/tests/modules/flag_link_test/flag_link_test.routing.yml"
+},
+{
+"mod": "station",
+"kind": "route",
+"route": "station_playlists_by_program",
+"path": "/station/playlists/{entity}",
+"target": "\\Drupal\\station_playlist\\Controller\\PlaylistsByProgramController::render",
+"access": "access content",
+"write": false,
+"file": "station/station_playlist/station_playlist.routing.yml"
+},
+{
+"mod": "rest_api_authentication",
+"kind": "route",
+"route": "rest_api_authentication.token_revoke",
+"path": "/rest_api/revoke",
+"target": "\\Drupal\\rest_api_authentication\\Controller\\RestApiAuthenticationController::revokeToken",
+"access": "TRUE",
+"write": false,
+"file": "rest_api_authentication/rest_api_authentication.routing.yml"
+},
+{
+"mod": "devel",
+"kind": "route",
+"route": "devel_dumper_test.debug",
+"path": "/devel_dumper_test/debug",
+"target": "\\Drupal\\devel_dumper_test\\Controller\\DumperTestController::debug",
+"access": "TRUE",
+"write": false,
+"file": "devel/tests/modules/devel_dumper_test/devel_dumper_test.routing.yml"
+},
+{
+"mod": "rules",
+"kind": "route",
+"route": "rules_test_event.dispatch_form",
+"path": "/dispatch-form",
+"target": "path: ",
+"access": "access content",
+"write": false,
+"file": "rules/tests/modules/rules_test_event/rules_test_event.routing.yml"
+},
+{
+"mod": "matomo",
+"kind": "route",
+"route": "matomo_test.drupal_messenger_add_message",
+"path": "/matomo-test/drupal-messenger-add-message",
+"target": "\\Drupal\\matomo_test\\Controller\\MatomoTestController::drupalAddMessageTest",
+"access": "TRUE",
+"write": false,
+"file": "matomo/tests/modules/matomo_test/matomo_test.routing.yml"
+},
+{
+"mod": "sendgrid_integration",
+"kind": "route",
+"route": "sendgrid_integration_reports.reports",
+"path": "admin/reports/sendgrid",
+"target": "Drupal\\sendgrid_integration_reports\\Controller\\SendGridReportsController:getReports",
+"access": "access site reports",
+"write": false,
+"file": "sendgrid_integration/modules/sendgrid_integration_reports/sendgrid_integration_reports.routing.yml"
+},
+{
+"mod": "customerror",
+"kind": "route",
+"route": "customerror.error_page",
+"path": "/customerror/{code}",
+"target": "\\Drupal\\customerror\\Controller\\CustomErrorController::index",
+"access": "TRUE",
+"write": false,
+"file": "customerror/customerror.routing.yml"
+},
+{
+"mod": "mailsystem",
+"kind": "route",
+"route": "mailsystem_test.theme",
+"path": "/mailsystem-test/theme",
+"target": "\\Drupal\\mailsystem_test\\Controller\\MailsystemTestController::sendMail",
+"access": "TRUE",
+"write": false,
+"file": "mailsystem/tests/modules/mailsystem_test/mailsystem_test.routing.yml"
+},
+{
+"mod": "search404",
+"kind": "route",
+"route": "search404.page",
+"path": "/search404",
+"target": "\\Drupal\\search404\\Controller\\Search404Controller::search404Page",
+"access": "access content",
+"write": false,
+"file": "search404/search404.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_price_test.number_test_form",
+"path": "/commerce_price_test/number_test_form",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/price/tests/modules/commerce_price_test/commerce_price_test.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_price_test.price_test_form",
+"path": "/commerce_price_test/price_test_form",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/price/tests/modules/commerce_price_test/commerce_price_test.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_price_test.ajax_price_test_form",
+"path": "/commerce_price_test/ajax_price_test_form",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/price/tests/modules/commerce_price_test/commerce_price_test.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order.address_book.overview",
+"path": "/user/{user}/address-book",
+"target": "\\Drupal\\commerce_order\\Controller\\AddressBookController::overviewPage",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/commerce_order.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order.address_book.add_form",
+"path": "/user/{user}/address-book/add/{profile_type}",
+"target": "\\Drupal\\commerce_order\\Controller\\AddressBookController::addForm",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/commerce_order.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order.address_book.edit_form",
+"path": "/user/{user}/address-book/{profile}/edit",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/commerce_order.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order.address_book.delete_form",
+"path": "/user/{user}/address-book/{profile}/delete",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/commerce_order.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order.address_book.set_default",
+"path": "/user/{user}/address-book/{profile}/set-default",
+"target": "\\Drupal\\commerce_order\\Controller\\AddressBookController::setDefault",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/commerce_order.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order_test.customer_profile_test_form",
+"path": "/commerce_order_test/customer_profile_test_form/{profile}/{admin}",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/tests/modules/commerce_order_test/commerce_order_test.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order_test.save_no_lock",
+"path": "/commerce/test/resave-no-lock/{commerce_order}",
+"target": "\\Drupal\\commerce_order_test\\Controller\\CommerceOrderTestController::testSaveNoLock",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/tests/modules/commerce_order_test/commerce_order_test.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_order_test.save_lock",
+"path": "/commerce/test/resave-lock/{commerce_order}",
+"target": "\\Drupal\\commerce_order_test\\Controller\\CommerceOrderTestController::testSaveLock",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/order/tests/modules/commerce_order_test/commerce_order_test.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_tax.verify",
+"path": "/commerce_tax/verify/{tax_number}/{context}",
+"target": "\\Drupal\\commerce_tax\\Controller\\TaxNumberController::verify",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/tax/commerce_tax.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_tax.verification_result",
+"path": "/commerce_tax/verification-result/{tax_number}/{context}",
+"target": "\\Drupal\\commerce_tax\\Controller\\TaxNumberController::result",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/tax/commerce_tax.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "entity.commerce_payment.add_form",
+"path": "/admin/commerce/orders/{commerce_order}/payments/add",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/payment/commerce_payment.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "entity.commerce_payment.operation_form",
+"path": "/admin/commerce/orders/{commerce_order}/payments/{commerce_payment}/operation/{operation}",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/payment/commerce_payment.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_payment.notify",
+"path": "/payment/notify/{commerce_payment_gateway}",
+"target": "\\Drupal\\commerce_payment\\Controller\\PaymentNotificationController::notifyPage",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/payment/commerce_payment.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_cart.page",
+"path": "/cart",
+"target": "\\Drupal\\commerce_cart\\Controller\\CartController::cartPage",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/cart/commerce_cart.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_payment_example.dummy_redirect_post",
+"path": "commerce_payment_example/dummy_redirect_post",
+"target": "\\Drupal\\commerce_payment_example\\Controller\\DummyRedirectController::post",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/payment_example/commerce_payment_example.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_payment_example.dummy_redirect_302",
+"path": "commerce_payment_example/dummy_redirect_302",
+"target": "\\Drupal\\commerce_payment_example\\Controller\\DummyRedirectController::on302",
+"access": "TRUE",
+"write": false,
+"file": "commerce/modules/payment_example/commerce_payment_example.routing.yml"
+},
+{
+"mod": "commerce",
+"kind": "route",
+"route": "commerce_test.redirect_form",
+"path": "/commerce_test/redirect_form",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "commerce/tests/modules/commerce_test/commerce_test.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.homonyms",
+"path": "/g2/homonyms/{g2_match}",
+"target": "\\Drupal\\g2\\Controller\\Homonyms::indexAction",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.initial",
+"path": "/g2/initial/{g2_initial}",
+"target": "\\Drupal\\g2\\Controller\\Initial::indexAction",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.initial.bare",
+"path": "/g2/initial",
+"target": "\\Drupal\\g2\\Controller\\Initial::redirect",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.main",
+"path": "/g2",
+"target": "\\Drupal\\g2\\Controller\\Main::indexAction",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.node_referers",
+"path": "/node/{node}/g2_referers",
+"target": "\\Drupal\\g2\\Controller\\Referers::countReferers",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "google_tag",
+"kind": "route",
+"route": "google_tag_test.generate_lead_form",
+"path": "/google-tag-generate-lead",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "google_tag/tests/modules/google_tag_test/google_tag_test.routing.yml"
+},
+{
+"mod": "plupload",
+"kind": "route",
+"route": "plupload.upload",
+"path": "/plupload-handle-uploads",
+"target": "\\Drupal\\plupload\\UploadController::handleUploads",
+"access": "access content",
+"write": false,
+"file": "plupload/plupload.routing.yml"
+},
+{
+"mod": "plupload",
+"kind": "route",
+"route": "plupload.test",
+"path": "/plupload-test",
+"target": "Drupal\\plupload_test\\PluploadTestForm",
+"access": "TRUE",
+"write": false,
+"file": "plupload/plupload_test/plupload_test.routing.yml"
+},
+{
+"mod": "recaptcha",
+"kind": "route",
+"route": "recaptcha_test.page",
+"path": "/recaptcha-test",
+"target": "\\Drupal\\recaptcha_test\\Controller\\RecaptchaTestAjaxFormController::button",
+"access": "TRUE",
+"write": false,
+"file": "recaptcha/tests/modules/recaptcha_test/recaptcha_test.routing.yml"
+},
+{
+"mod": "recaptcha",
+"kind": "route",
+"route": "recaptcha_test.ajax",
+"path": "/recaptcha-test/ajax",
+"target": "\\Drupal\\recaptcha_test\\Controller\\RecaptchaTestAjaxFormController::ajaxForm",
+"access": "TRUE",
+"write": false,
+"file": "recaptcha/tests/modules/recaptcha_test/recaptcha_test.routing.yml"
+},
+{
+"mod": "recaptcha",
+"kind": "route",
+"route": "recaptcha_test.form",
+"path": "/recaptcha-test/form",
+"target": "\\Drupal\\recaptcha_test\\Form\\RecaptchaTestAjaxForm",
+"access": "TRUE",
+"write": false,
+"file": "recaptcha/tests/modules/recaptcha_test/recaptcha_test.routing.yml"
+},
+{
+"mod": "antibot",
+"kind": "route",
+"route": "antibot.antibot",
+"path": "/antibot",
+"target": "\\Drupal\\antibot\\Controller\\AntibotPageController::page",
+"access": "TRUE",
+"write": false,
+"file": "antibot/antibot.routing.yml"
+},
+{
+"mod": "simple_sitemap",
+"kind": "route",
+"route": "simple_sitemap.sitemap_default",
+"path": "/sitemap.xml",
+"target": "\\Drupal\\simple_sitemap\\Controller\\SimpleSitemapController::getSitemap",
+"access": "TRUE",
+"write": false,
+"file": "simple_sitemap/simple_sitemap.routing.yml"
+},
+{
+"mod": "simple_sitemap",
+"kind": "route",
+"route": "simple_sitemap.sitemap_variant",
+"path": "/sitemaps/{variant}/sitemap.xml",
+"target": "\\Drupal\\simple_sitemap\\Controller\\SimpleSitemapController::getSitemap",
+"access": "TRUE",
+"write": false,
+"file": "simple_sitemap/simple_sitemap.routing.yml"
+},
+{
+"mod": "simple_sitemap",
+"kind": "route",
+"route": "simple_sitemap.sitemap_xsl",
+"path": "/sitemap_generator/{sitemap_generator}/sitemap.xsl",
+"target": "\\Drupal\\simple_sitemap\\Controller\\SimpleSitemapController::getSitemapXsl",
+"access": "TRUE",
+"write": false,
+"file": "simple_sitemap/simple_sitemap.routing.yml"
+},
+{
+"mod": "simple_sitemap",
+"kind": "route",
+"route": "simple_sitemap.engines.index_now.key",
+"path": "/simple_sitemap_engines/index_now_key/{key}",
+"target": "\\Drupal\\simple_sitemap_engines\\Controller\\IndexNowController::getKeyFile",
+"access": "TRUE",
+"write": false,
+"file": "simple_sitemap/modules/simple_sitemap_engines/simple_sitemap_engines.routing.yml"
+},
+{
+"mod": "entity_browser",
+"kind": "route",
+"route": "entity_browser_test.element",
+"path": "/test-element",
+"target": "\\Drupal\\entity_browser_test\\Form\\FormElementTestForm",
+"access": "TRUE",
+"write": false,
+"file": "entity_browser/tests/modules/entity_browser_test/entity_browser_test.routing.yml"
+},
+{
+"mod": "address",
+"kind": "route",
+"route": "address_test.default_value_test_form",
+"path": "/address_test/default_value_test_form",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "address/tests/modules/address_test/address_test.routing.yml"
+},
+{
+"mod": "address",
+"kind": "route",
+"route": "address_test.zone_territory_test_form",
+"path": "/address_test/zone_territory_test_form",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "address/tests/modules/address_test/address_test.routing.yml"
+},
+{
+"mod": "domain",
+"kind": "route",
+"route": "domain_test_redirect.non_trusted_redirect",
+"path": "/non-trusted-redirect",
+"target": "Drupal\\domain_test_redirect\\Controller\\TestRedirectController::nonTrustedRedirect",
+"access": "TRUE",
+"write": false,
+"file": "domain/domain/tests/modules/domain_test_redirect/domain_test_redirect.routing.yml"
+},
+{
+"mod": "domain",
+"kind": "route",
+"route": "domain_test_redirect.trusted_redirect",
+"path": "/trusted-redirect",
+"target": "Drupal\\domain_test_redirect\\Controller\\TestRedirectController::trustedRedirect",
+"access": "TRUE",
+"write": false,
+"file": "domain/domain/tests/modules/domain_test_redirect/domain_test_redirect.routing.yml"
+},
+{
+"mod": "captcha",
+"kind": "route",
+"route": "image_captcha.generator",
+"path": "/image-captcha-generate/{session_id}/{timestamp}",
+"target": "\\Drupal\\image_captcha\\Controller\\CaptchaImageGeneratorController::image",
+"access": "TRUE",
+"write": false,
+"file": "captcha/modules/image_captcha/image_captcha.routing.yml"
+},
+{
+"mod": "captcha",
+"kind": "route",
+"route": "image_captcha.refresh",
+"path": "/image-captcha-refresh/{form_id}",
+"target": "\\Drupal\\image_captcha\\Controller\\CaptchaImageRefreshController::refreshCaptcha",
+"access": "TRUE",
+"write": false,
+"file": "captcha/modules/image_captcha/image_captcha.routing.yml"
+},
+{
+"mod": "captcha",
+"kind": "route",
+"route": "image_captcha_test.test",
+"path": "/captcha-test/image-test",
+"target": "Drupal\\image_captcha_test\\Form\\ImageCaptchaTestForm",
+"access": "access content",
+"write": false,
+"file": "captcha/modules/image_captcha/tests/modules/image_captcha_test/image_captcha_test.routing.yml"
+},
+{
+"mod": "captcha",
+"kind": "route",
+"route": "captcha_long_form_id_test.this_formid_is_intentionally_longer_than_64_characters_to_test_captcha",
+"path": "captcha/test_form/long_id",
+"target": "\\Drupal\\captcha_long_form_id_test\\Form\\LongIdForm",
+"access": "TRUE",
+"write": false,
+"file": "captcha/tests/modules/captcha_long_form_id_test/captcha_long_form_id_test.routing.yml"
+},
+{
+"mod": "captcha",
+"kind": "route",
+"route": "captcha_test.test",
+"path": "/captcha-test/test",
+"target": "Drupal\\captcha_test\\Form\\TestForm",
+"access": "access content",
+"write": false,
+"file": "captcha/tests/modules/captcha_test/captcha_test.routing.yml"
+},
+{
+"mod": "openid_connect",
+"kind": "route",
+"route": "openid_connect.redirect_controller_redirect",
+"path": "/openid-connect/{openid_connect_client}",
+"target": "\\Drupal\\openid_connect\\Controller\\OpenIDConnectRedirectController::authenticate",
+"access": "TRUE",
+"write": false,
+"file": "openid_connect/openid_connect.routing.yml"
+},
+{
+"mod": "openid_connect",
+"kind": "route",
+"route": "openid_connect.login",
+"path": "/user/login/openid_connect",
+"target": "\\Drupal\\openid_connect\\Controller\\OpenIDConnectLoginController::loginForm",
+"access": "TRUE",
+"write": false,
+"file": "openid_connect/openid_connect.routing.yml"
+},
+{
+"mod": "inline_entity_form",
+"kind": "route",
+"route": "inline_entity_form_test.form",
+"path": "/ief-test/{form_mode}/{node}",
+"target": "\\Drupal\\inline_entity_form_test\\IefTestForm",
+"access": "TRUE",
+"write": false,
+"file": "inline_entity_form/tests/modules/inline_entity_form_test/inline_entity_form_test.routing.yml"
+},
+{
+"mod": "masquerade",
+"kind": "route",
+"route": "masquerade.block",
+"path": "/masquerade",
+"target": "\\Drupal\\masquerade\\Form\\MasqueradeForm",
+"access": "TRUE",
+"write": false,
+"file": "masquerade/masquerade.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_login",
+"path": "/saml/login",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::login",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_reauth",
+"path": "/saml/reauth",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::reauth",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_logout",
+"path": "/saml/logout",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::logout",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_acs",
+"path": "/saml/acs",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::acs",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_sls",
+"path": "/saml/sls",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::sls",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "comment_notify",
+"kind": "route",
+"route": "comment_notify.disable",
+"path": "/comment_notify/disable/{hash}",
+"target": "\\Drupal\\comment_notify\\Controller\\CommentNotifyController::disable",
+"access": "access content",
+"write": false,
+"file": "comment_notify/comment_notify.routing.yml"
+},
+{
+"mod": "semantic_search",
+"kind": "route",
+"route": "semantic_search.search_form",
+"path": "/admin/config/search/semantic_search/search",
+"target": "path: ",
+"access": "access content",
+"write": false,
+"file": "semantic_search/semantic_search.routing.yml"
+},
+{
+"mod": "adsense",
+"kind": "route",
+"route": "adsense_cse.results",
+"path": "/adsense/cse",
+"target": "\\Drupal\\adsense\\Controller\\CseResultsController::display",
+"access": "TRUE",
+"write": false,
+"file": "adsense/adsense.routing.yml"
+},
+{
+"mod": "adsense",
+"kind": "route",
+"route": "adsense_csev2.results",
+"path": "/csev2/results/{slot}",
+"target": "\\Drupal\\adsense\\Controller\\CseV2ResultsController::display",
+"access": "TRUE",
+"write": false,
+"file": "adsense/adsense.routing.yml"
+},
+{
+"mod": "mailchimp",
+"kind": "route",
+"route": "mailchimp.webhook_endpoint",
+"path": "mailchimp/webhook/{hash}",
+"target": "\\Drupal\\mailchimp\\Controller\\MailchimpWebhookController::endpoint",
+"access": "TRUE",
+"write": false,
+"file": "mailchimp/mailchimp.routing.yml"
+},
+{
+"mod": "seckit",
+"kind": "route",
+"route": "seckit.report",
+"path": "/report-csp-violation",
+"target": "\\Drupal\\seckit\\Controller\\SeckitExportController::export",
+"access": "TRUE",
+"write": false,
+"file": "seckit/seckit.routing.yml"
+},
+{
+"mod": "services",
+"kind": "route",
+"route": "services.csrf_token",
+"path": "/services/session/token",
+"target": "\\Drupal\\services\\Controller\\Services::csrfToken",
+"access": "TRUE",
+"write": false,
+"file": "services/services.routing.yml"
+},
+{
+"mod": "select2",
+"kind": "route",
+"route": "select2.entity_autocomplete",
+"path": "/select2_autocomplete/{target_type}/{selection_handler}/{selection_settings_key}",
+"target": "\\Drupal\\select2\\Controller\\EntityAutocompleteController::handleAutocomplete",
+"access": "TRUE",
+"write": false,
+"file": "select2/select2.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "entity.feeds_feed.receive",
+"path": "/feed/{feeds_subscription}/{feeds_push_token}/push_callback",
+"target": "Drupal\\feeds\\Controller\\SubscriptionController::receive",
+"access": "TRUE",
+"write": true,
+"file": "feeds/feeds.routing.yml"
+},
+{
+"mod": "feeds",
+"kind": "route",
+"route": "entity.feeds_feed.subscribe",
+"path": "/feed/{feeds_subscription_id}/{feeds_push_token}/push_callback",
+"target": "Drupal\\feeds\\Controller\\SubscriptionController::subscribe",
+"access": "TRUE",
+"write": false,
+"file": "feeds/feeds.routing.yml"
+},
+{
+"mod": "content_access",
+"kind": "route",
+"route": "entity.node.content_access",
+"path": "/node/{node}/access",
+"target": "\\Drupal\\content_access\\Form\\ContentAccessPageForm",
+"access": "TRUE",
+"write": false,
+"file": "content_access/content_access.routing.yml"
+},
+{
+"mod": "content_access",
+"kind": "route",
+"route": "entity.node_type.content_access_form",
+"path": "/admin/structure/types/manage/{node_type}/access",
+"target": "path: ",
+"access": "TRUE",
+"write": false,
+"file": "content_access/content_access.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.login",
+"path": "/caslogin",
+"target": "\\Drupal\\cas\\Controller\\ForceLoginController::forceLogin",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.legacy_login",
+"path": "/cas",
+"target": "\\Drupal\\cas\\Controller\\ForceLoginController::forceLogin",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.service",
+"path": "/casservice",
+"target": "\\Drupal\\cas\\Controller\\ServiceController::handle",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.proxyCallback",
+"path": "/casproxycallback",
+"target": "\\Drupal\\cas\\Controller\\ProxyCallbackController::callback",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "cas",
+"kind": "route",
+"route": "cas.logout",
+"path": "/caslogout",
+"target": "\\Drupal\\cas\\Controller\\LogoutController::logout",
+"access": "TRUE",
+"write": false,
+"file": "cas/cas.routing.yml"
+},
+{
+"mod": "bookmarks",
+"kind": "route",
+"route": "entity.user.bookmarks",
+"path": "/user/{user}/bookmarks",
+"target": "\\Drupal\\bookmarks\\Controller\\BookmarksController::build",
+"access": "TRUE",
+"write": false,
+"file": "bookmarks/bookmarks.routing.yml"
+},
+{
+"mod": "social_auth",
+"kind": "route",
+"route": "social_auth.network.redirect",
+"path": "user/login/{network}",
+"target": "\\Drupal\\social_auth\\Controller\\OAuth2ControllerBase::redirectToProvider",
+"access": "TRUE",
+"write": false,
+"file": "social_auth/social_auth.routing.yml"
+},
+{
+"mod": "social_auth",
+"kind": "route",
+"route": "social_auth.network.callback",
+"path": "user/login/{network}/callback",
+"target": "\\Drupal\\social_auth\\Controller\\OAuth2ControllerBase::callback",
+"access": "TRUE",
+"write": false,
+"file": "social_auth/social_auth.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "oauth2_token.token",
+"path": "/oauth/token",
+"target": "Drupal\\simple_oauth\\Controller\\Oauth2Token::token",
+"access": "TRUE",
+"write": true,
+"file": "simple_oauth/simple_oauth.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "oauth2_token.authorize",
+"path": "/oauth/authorize",
+"target": "Drupal\\simple_oauth\\Controller\\Oauth2AuthorizeController::authorize",
+"access": "TRUE",
+"write": true,
+"file": "simple_oauth/simple_oauth.routing.yml"
+},
+{
+"mod": "simple_oauth",
+"kind": "route",
+"route": "simple_oauth.jwks",
+"path": "/oauth/jwks",
+"target": "Drupal\\simple_oauth\\Controller\\Jwks::handle",
+"access": "TRUE",
+"write": false,
+"file": "simple_oauth/simple_oauth.routing.yml"
+},
+{
+"mod": "rest_api_authentication",
+"kind": "route",
+"route": "rest_api_authentication.token_revoke",
+"path": "/rest_api/revoke",
+"target": "\\Drupal\\rest_api_authentication\\Controller\\RestApiAuthenticationController::revokeToken",
+"access": "TRUE",
+"write": false,
+"file": "rest_api_authentication/rest_api_authentication.routing.yml"
+},
+{
+"mod": "customerror",
+"kind": "route",
+"route": "customerror.error_page",
+"path": "/customerror/{code}",
+"target": "\\Drupal\\customerror\\Controller\\CustomErrorController::index",
+"access": "TRUE",
+"write": false,
+"file": "customerror/customerror.routing.yml"
+},
+{
+"mod": "search404",
+"kind": "route",
+"route": "search404.page",
+"path": "/search404",
+"target": "\\Drupal\\search404\\Controller\\Search404Controller::search404Page",
+"access": "access content",
+"write": false,
+"file": "search404/search404.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.homonyms",
+"path": "/g2/homonyms/{g2_match}",
+"target": "\\Drupal\\g2\\Controller\\Homonyms::indexAction",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.initial",
+"path": "/g2/initial/{g2_initial}",
+"target": "\\Drupal\\g2\\Controller\\Initial::indexAction",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.initial.bare",
+"path": "/g2/initial",
+"target": "\\Drupal\\g2\\Controller\\Initial::redirect",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.main",
+"path": "/g2",
+"target": "\\Drupal\\g2\\Controller\\Main::indexAction",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "g2",
+"kind": "route",
+"route": "g2.node_referers",
+"path": "/node/{node}/g2_referers",
+"target": "\\Drupal\\g2\\Controller\\Referers::countReferers",
+"access": "access content",
+"write": false,
+"file": "g2/g2.routing.yml"
+},
+{
+"mod": "plupload",
+"kind": "route",
+"route": "plupload.upload",
+"path": "/plupload-handle-uploads",
+"target": "\\Drupal\\plupload\\UploadController::handleUploads",
+"access": "access content",
+"write": false,
+"file": "plupload/plupload.routing.yml"
+},
+{
+"mod": "antibot",
+"kind": "route",
+"route": "antibot.antibot",
+"path": "/antibot",
+"target": "\\Drupal\\antibot\\Controller\\AntibotPageController::page",
+"access": "TRUE",
+"write": false,
+"file": "antibot/antibot.routing.yml"
+},
+{
+"mod": "simple_sitemap",
+"kind": "route",
+"route": "simple_sitemap.sitemap_default",
+"path": "/sitemap.xml",
+"target": "\\Drupal\\simple_sitemap\\Controller\\SimpleSitemapController::getSitemap",
+"access": "TRUE",
+"write": false,
+"file": "simple_sitemap/simple_sitemap.routing.yml"
+},
+{
+"mod": "simple_sitemap",
+"kind": "route",
+"route": "simple_sitemap.sitemap_variant",
+"path": "/sitemaps/{variant}/sitemap.xml",
+"target": "\\Drupal\\simple_sitemap\\Controller\\SimpleSitemapController::getSitemap",
+"access": "TRUE",
+"write": false,
+"file": "simple_sitemap/simple_sitemap.routing.yml"
+},
+{
+"mod": "simple_sitemap",
+"kind": "route",
+"route": "simple_sitemap.sitemap_xsl",
+"path": "/sitemap_generator/{sitemap_generator}/sitemap.xsl",
+"target": "\\Drupal\\simple_sitemap\\Controller\\SimpleSitemapController::getSitemapXsl",
+"access": "TRUE",
+"write": false,
+"file": "simple_sitemap/simple_sitemap.routing.yml"
+},
+{
+"mod": "openid_connect",
+"kind": "route",
+"route": "openid_connect.redirect_controller_redirect",
+"path": "/openid-connect/{openid_connect_client}",
+"target": "\\Drupal\\openid_connect\\Controller\\OpenIDConnectRedirectController::authenticate",
+"access": "TRUE",
+"write": false,
+"file": "openid_connect/openid_connect.routing.yml"
+},
+{
+"mod": "openid_connect",
+"kind": "route",
+"route": "openid_connect.login",
+"path": "/user/login/openid_connect",
+"target": "\\Drupal\\openid_connect\\Controller\\OpenIDConnectLoginController::loginForm",
+"access": "TRUE",
+"write": false,
+"file": "openid_connect/openid_connect.routing.yml"
+},
+{
+"mod": "masquerade",
+"kind": "route",
+"route": "masquerade.block",
+"path": "/masquerade",
+"target": "\\Drupal\\masquerade\\Form\\MasqueradeForm",
+"access": "TRUE",
+"write": false,
+"file": "masquerade/masquerade.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_login",
+"path": "/saml/login",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::login",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_reauth",
+"path": "/saml/reauth",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::reauth",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_logout",
+"path": "/saml/logout",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::logout",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_acs",
+"path": "/saml/acs",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::acs",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "samlauth",
+"kind": "route",
+"route": "samlauth.saml_controller_sls",
+"path": "/saml/sls",
+"target": "\\Drupal\\samlauth\\Controller\\SamlController::sls",
+"access": "TRUE",
+"write": false,
+"file": "samlauth/samlauth.routing.yml"
+},
+{
+"mod": "autotimezone",
+"kind": "hook_menu_d7",
+"route": "autotimezone",
+"path": "autotimezone",
+"target": "autotimezone_page",
+"access": "TRUE",
+"write": false,
+"file": "autotimezone/autotimezone.module"
+},
+{
+"mod": "gotwo",
+"kind": "hook_menu_d7",
+"route": "go",
+"path": "go",
+"target": "_gotwo_do_redir",
+"access": "TRUE",
+"write": false,
+"file": "gotwo/gotwo.module"
+},
+{
+"mod": "phpbb2drupal",
+"kind": "hook_menu_d7",
+"route": "viewtopic.php",
+"path": "viewtopic.php",
+"target": "phpbb_redirect_viewtopic",
+"access": "TRUE",
+"write": false,
+"file": "phpbb2drupal/phpbb_redirect.module"
+},
+{
+"mod": "phpbb2drupal",
+"kind": "hook_menu_d7",
+"route": "viewforum.php",
+"path": "viewforum.php",
+"target": "phpbb_redirect_viewforum",
+"access": "TRUE",
+"write": false,
+"file": "phpbb2drupal/phpbb_redirect.module"
+},
+{
+"mod": "commentmail",
+"kind": "hook_menu_d7",
+"route": "comment/qa/%",
+"path": "comment/qa/%",
+"target": "commentmail_quick_approve",
+"access": "TRUE",
+"write": false,
+"file": "commentmail/commentmail.module"
+},
+{
+"mod": "commentmail",
+"kind": "hook_menu_d7",
+"route": "comment/qa/%/%",
+"path": "comment/qa/%/%",
+"target": "commentmail_quick_approve",
+"access": "TRUE",
+"write": false,
+"file": "commentmail/commentmail.module"
+},
+{
+"mod": "logintoboggan",
+"kind": "hook_menu_d7",
+"route": "toboggan/denied",
+"path": "toboggan/denied",
+"target": "logintoboggan_denied",
+"access": "TRUE",
+"write": false,
+"file": "logintoboggan/logintoboggan.module"
+},
+{
+"mod": "securesite",
+"kind": "hook_menu_d7",
+"route": "securesite_403",
+"path": "securesite_403",
+"target": "_securesite_403",
+"access": "TRUE",
+"write": false,
+"file": "securesite/securesite.module"
+},
+{
+"mod": "og_vocab",
+"kind": "hook_menu_d7",
+"route": "og-vocab/autocomplete/single/%entity_object",
+"path": "og-vocab/autocomplete/single/%entity_object",
+"target": "og_vocab_autocomplete_callback",
+"access": "TRUE",
+"write": false,
+"file": "og_vocab/og_vocab.module"
+},
+{
+"mod": "og_vocab",
+"kind": "hook_menu_d7",
+"route": "og-vocab/autocomplete/tags/%entity_object",
+"path": "og-vocab/autocomplete/tags/%entity_object",
+"target": "og_vocab_autocomplete_callback",
+"access": "TRUE",
+"write": false,
+"file": "og_vocab/og_vocab.module"
+},
+{
+"mod": "lightbox2",
+"kind": "hook_menu_d7",
+"route": "system/lightbox2/filter-xss",
+"path": "system/lightbox2/filter-xss",
+"target": "lightbox2_filter_xss",
+"access": "TRUE",
+"write": false,
+"file": "lightbox2/lightbox2.module"
+},
+{
+"mod": "image_pub",
+"kind": "hook_menu_d7",
+"route": "gallery_remote2.php",
+"path": "gallery_remote2.php",
+"target": "_image_pub_gr_request",
+"access": "TRUE",
+"write": false,
+"file": "image_pub/image_pub.module"
+},
+{
+"mod": "referral",
+"kind": "hook_menu_d7",
+"route": "referral",
+"path": "referral",
+"target": "referral_get",
+"access": "TRUE",
+"write": false,
+"file": "referral/referral.module"
+},
+{
+"mod": "drupalvb",
+"kind": "hook_menu_d7",
+"route": "drupalvb/login",
+"path": "drupalvb/login",
+"target": "drupalvb_login",
+"access": "TRUE",
+"write": false,
+"file": "drupalvb/drupalvb.module"
+},
+{
+"mod": "drupalvb",
+"kind": "hook_menu_d7",
+"route": "drupalvb/logout",
+"path": "drupalvb/logout",
+"target": "drupalvb_logout",
+"access": "TRUE",
+"write": false,
+"file": "drupalvb/drupalvb.module"
+},
+{
+"mod": "imagecache",
+"kind": "hook_menu_d7",
+"route": "system/files/imagecache",
+"path": "system/files/imagecache",
+"target": "imagecache_cache_private",
+"access": "TRUE",
+"write": false,
+"file": "imagecache/imagecache.module"
+},
+{
+"mod": "autotimezone",
+"kind": "hook_menu_d7",
+"route": "autotimezone",
+"path": "autotimezone",
+"target": "autotimezone_page",
+"access": "TRUE",
+"write": false,
+"file": "autotimezone/autotimezone.module"
+},
+{
+"mod": "gotwo",
+"kind": "hook_menu_d7",
+"route": "go",
+"path": "go",
+"target": "_gotwo_do_redir",
+"access": "TRUE",
+"write": false,
+"file": "gotwo/gotwo.module"
+},
+{
+"mod": "phpbb2drupal",
+"kind": "hook_menu_d7",
+"route": "viewtopic.php",
+"path": "viewtopic.php",
+"target": "phpbb_redirect_viewtopic",
+"access": "TRUE",
+"write": false,
+"file": "phpbb2drupal/phpbb_redirect.module"
+},
+{
+"mod": "phpbb2drupal",
+"kind": "hook_menu_d7",
+"route": "viewforum.php",
+"path": "viewforum.php",
+"target": "phpbb_redirect_viewforum",
+"access": "TRUE",
+"write": false,
+"file": "phpbb2drupal/phpbb_redirect.module"
+},
+{
+"mod": "commentmail",
+"kind": "hook_menu_d7",
+"route": "comment/qa/%",
+"path": "comment/qa/%",
+"target": "commentmail_quick_approve",
+"access": "TRUE",
+"write": false,
+"file": "commentmail/commentmail.module"
+},
+{
+"mod": "commentmail",
+"kind": "hook_menu_d7",
+"route": "comment/qa/%/%",
+"path": "comment/qa/%/%",
+"target": "commentmail_quick_approve",
+"access": "TRUE",
+"write": false,
+"file": "commentmail/commentmail.module"
+},
+{
+"mod": "logintoboggan",
+"kind": "hook_menu_d7",
+"route": "toboggan/denied",
+"path": "toboggan/denied",
+"target": "logintoboggan_denied",
+"access": "TRUE",
+"write": false,
+"file": "logintoboggan/logintoboggan.module"
+},
+{
+"mod": "advanced_menu",
+"kind": "hook_menu_d7",
+"route": "advanced-menus/sub-menus/%menu",
+"path": "advanced-menus/sub-menus/%menu",
+"target": "_advanced_menu_submenu_callback",
+"access": "TRUE",
+"write": false,
+"file": "advanced_menu/submenu/advanced_menu_submenu.module"
+},
+{
+"mod": "securesite",
+"kind": "hook_menu_d7",
+"route": "securesite_403",
+"path": "securesite_403",
+"target": "_securesite_403",
+"access": "TRUE",
+"write": false,
+"file": "securesite/securesite.module"
+},
+{
+"mod": "og_vocab",
+"kind": "hook_menu_d7",
+"route": "og-vocab/autocomplete/single/%entity_object",
+"path": "og-vocab/autocomplete/single/%entity_object",
+"target": "og_vocab_autocomplete_callback",
+"access": "TRUE",
+"write": false,
+"file": "og_vocab/og_vocab.module"
+},
+{
+"mod": "og_vocab",
+"kind": "hook_menu_d7",
+"route": "og-vocab/autocomplete/tags/%entity_object",
+"path": "og-vocab/autocomplete/tags/%entity_object",
+"target": "og_vocab_autocomplete_callback",
+"access": "TRUE",
+"write": false,
+"file": "og_vocab/og_vocab.module"
+},
+{
+"mod": "lightbox2",
+"kind": "hook_menu_d7",
+"route": "system/lightbox2/filter-xss",
+"path": "system/lightbox2/filter-xss",
+"target": "lightbox2_filter_xss",
+"access": "TRUE",
+"write": false,
+"file": "lightbox2/lightbox2.module"
+},
+{
+"mod": "image_pub",
+"kind": "hook_menu_d7",
+"route": "gallery_remote2.php",
+"path": "gallery_remote2.php",
+"target": "_image_pub_gr_request",
+"access": "TRUE",
+"write": false,
+"file": "image_pub/image_pub.module"
+},
+{
+"mod": "referral",
+"kind": "hook_menu_d7",
+"route": "referral",
+"path": "referral",
+"target": "referral_get",
+"access": "TRUE",
+"write": false,
+"file": "referral/referral.module"
+},
+{
+"mod": "drupalvb",
+"kind": "hook_menu_d7",
+"route": "drupalvb/login",
+"path": "drupalvb/login",
+"target": "drupalvb_login",
+"access": "TRUE",
+"write": false,
+"file": "drupalvb/drupalvb.module"
+},
+{
+"mod": "drupalvb",
+"kind": "hook_menu_d7",
+"route": "drupalvb/logout",
+"path": "drupalvb/logout",
+"target": "drupalvb_logout",
+"access": "TRUE",
+"write": false,
+"file": "drupalvb/drupalvb.module"
+},
+{
+"mod": "sso",
+"kind": "hook_menu_d7",
+"route": "singlesignon/associate",
+"path": "singlesignon/associate",
+"target": "singlesignon_controller_associate",
+"access": "TRUE",
+"write": false,
+"file": "sso/controller/singlesignon_controller.module"
+},
+{
+"mod": "imagecache",
+"kind": "hook_menu_d7",
+"route": "system/files/imagecache",
+"path": "system/files/imagecache",
+"target": "imagecache_cache_private",
+"access": "TRUE",
+"write": false,
+"file": "imagecache/imagecache.module"
+},
+{
+"mod": "i18n",
+"kind": "hook_menu_d7",
+"route": "tests/i18n/i18n_string_build/%",
+"path": "tests/i18n/i18n_string_build/%",
+"target": "i18n_string_build",
+"access": "TRUE",
+"write": false,
+"file": "i18n/tests/i18n_test.module"
+},
+{
+"mod": "i18n",
+"kind": "hook_menu_d7",
+"route": "tests/i18n/i18n_string_build/%/%",
+"path": "tests/i18n/i18n_string_build/%/%",
+"target": "i18n_string_build",
+"access": "TRUE",
+"write": false,
+"file": "i18n/tests/i18n_test.module"
+},
+{
+"mod": "i18n",
+"kind": "hook_menu_d7",
+"route": "tests/i18n/i18n_string_translation_search/%",
+"path": "tests/i18n/i18n_string_translation_search/%",
+"target": "i18n_string_translation_search",
+"access": "TRUE",
+"write": false,
+"file": "i18n/tests/i18n_test.module"
+},
+{
+"mod": "i18n",
+"kind": "hook_menu_d7",
+"route": "tests/i18n/i18n_string_translation_search/%/%",
+"path": "tests/i18n/i18n_string_translation_search/%/%",
+"target": "i18n_string_translation_search",
+"access": "TRUE",
+"write": false,
+"file": "i18n/tests/i18n_test.module"
+},
+{
+"mod": "import_html",
+"kind": "hook_menu_d7",
+"route": "static/content",
+"path": "static/content",
+"target": "static_generate_page",
+"access": "TRUE",
+"write": false,
+"file": "import_html/static/static.module"
+}
+]

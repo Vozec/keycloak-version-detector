@@ -1,0 +1,27 @@
+diff --git a/php/ql/lib/ext/drupal.model.yml b/php/ql/lib/ext/drupal.model.yml
+index 8850077ec1c..5c168eff1cc 100644
+--- a/php/ql/lib/ext/drupal.model.yml
++++ b/php/ql/lib/ext/drupal.model.yml
+@@ -41,6 +41,12 @@ extensions:
+       # RedirectResponse (Symfony, used by Drupal) — the destination URL.
+       - ["RedirectResponse", "__construct", 0, "open redirect"]
+       - ["TrustedRedirectResponse", "__construct", 0, "open redirect"]
++      # XSS: wrapping a string in Markup::create()/SafeMarkup::set()/format() marks it **safe HTML**,
++      # so tainted data flowed in renders unescaped via a render array `#markup` / Twig `|raw`.
++      # Class-scoped (typed) so the generic names `create`/`set`/`format` stay precise to Drupal.
++      - ["Markup", "create", 0, "reflected xss"]
++      - ["FormattableMarkup", "__construct", 0, "reflected xss"]
++      - ["SafeMarkup", "set", 0, "reflected xss"]
+ 
+   # ---- Sanitizers: Drupal escaping / filtering helpers ------------------------------------------
+   - addsTo: { pack: codeql/php-all, extensible: sanitizerModel }
+@@ -50,4 +56,9 @@ extensions:
+       - ["function", "filter_xss"]                             # Drupal 7 XSS filter
+       - ["function", "filter_xss_admin"]
+       - ["staticmethod", "checkPlain"]                         # SafeMarkup::checkPlain (deprecated)
++      - ["staticmethod", "escape"]                             # Html::escape — D8+ HTML-escape
++      - ["staticmethod", "escapeAttribute"]                    # Html::escapeAttribute
++      - ["staticmethod", "filter"]                             # Xss::filter — D8+ XSS filter
++      - ["staticmethod", "filterAdmin"]                        # Xss::filterAdmin
+       - ["method", "escapeLike"]                               # Connection::escapeLike — LIKE-wildcard escape
++      - ["method", "escapeField"]                              # Connection::escapeField — identifier escape (ORDER BY)
