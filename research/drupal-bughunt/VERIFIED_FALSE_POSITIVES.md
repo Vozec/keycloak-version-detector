@@ -68,3 +68,17 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   producing a local stream-wrapper URI; nothing is fetched. FP.
 - Access is profile-gated (`Imce::access` → `roles_profiles`); anonymous only if an admin assigns
   the anonymous role an IMCE profile. Auth-required by default.
+
+## Standalone-script / path cluster — FP or auth-required
+- **bookimport/contrib/outline.php** — CLI utility (`#!/usr/bin/php`, `argv[1]`); web reach needs
+  `register_argc_argv=On` and even then fatals at `require_once('node.php')` (missing in `contrib/`). FP.
+- **image_pub (D6)** `common.inc:183` — `filesize($_FILES['userfile']['tmp_name'])` (server temp path,
+  not request filename; upload is `create images`-gated); `gr.inc:141` echoes under `text/plain` and
+  the value is `check_plain`'d via `theme('placeholder')`. FP.
+- **email_verify (D7)** `email_verify.inc:573` — `fwrite($connect,"HELO…")` is an **fsockopen SMTP
+  socket**, not a file (CodeQL socket/file confusion); `valid_email_address()` blocks CRLF. The
+  `check.inc:218/268` SQLi is behind `administer users` + `is_numeric`. Not pre-auth. FP.
+- **go (D7)** `go.hooks.form.inc:14` — `"{$_GET['module']}_cron"()` guarded by `module_exists`, only
+  inside the `administer site configuration` cron-settings form. Auth-required + constrained. FP.
+- **commerce (D10/11)** `ProductVariationFieldRenderer.php:44` — `call_user_func` over core
+  `#pre_render` callables (code/config-populated render pipeline), never request input. FP.

@@ -82,3 +82,17 @@ legacy/abandoned cluster (CodeQL pipeline running).
   needs a POP gadget in the running app. But the standalone scripts are directly reachable
   regardless of Drupal version, and the object-injection primitive is unconditional. HIGH.
 - `phprpc_client.php` "SSRF" is a FP (fsockopen host is the hardcoded coolcode.cn, not request-driven).
+
+## 5. banner (Drupal 6, abandoned) — MEDIUM — pre-auth path traversal + unserialize via standalone banner_file.php (ORIGINAL)
+- **Entry (pre-auth, bypasses Drupal):** `modules/banner/banner_file.php` runs at file scope and does
+  its file I/O **before** any `drupal_bootstrap` (first bootstrap is `:100`, the file loop starts
+  `:18`). Directly reachable: `GET /sites/all/modules/banner/banner_file.php`.
+- **Chain:** `$path = $_GET['path']` (`:13`) → `$cache_file = $path.'/.'.$i.'.banner.cache'` (`:19`) →
+  `fopen($cache_file,'r+')` (`:20`) → `fread` (`:42`) → `unserialize($contents)` (`:44`) → `fwrite`
+  back (`:135`). **No `basename`/`realpath`/`..` filtering and no fixed base dir** → `$path` traverses
+  freely. `?path=../../../../some/dir&max=1&group=0&count=1&terms=0`.
+- **Primitives:** (1) path-traversal read/rewrite of any `*/.N.banner.cache` file (suffix hard-coded,
+  `r+` needs an existing writable file); (2) the sharper one — `unserialize()` of attacker-influenced
+  cache content = PHP object injection where the attacker can plant/redirect to a `.N.banner.cache`.
+- **Caveat (honest):** Drupal 6-era (abandoned, low deployment); the object-injection leg needs
+  attacker-controlled cache-file content. The pre-auth traversal + raw unserialize are unconditional. MED.
