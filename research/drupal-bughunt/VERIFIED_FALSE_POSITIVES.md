@@ -46,3 +46,15 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   over the TLS back-channel (unsigned parse is OIDC-§3.1.3.7-compliant). Email account-linking exists
   but only when the **default-off** `connect_existing_users` is enabled → NEEDS-CONFIG, not
   default-vulnerable (contrast social_auth #3, which has no toggle).
+
+## CodeQL taint FPs (bounded dispatch / name-collision / config-source / authenticated)
+- **key** `AuthenticationMultivalueKeyType.php:54` "unsafe deserialization" — the method *named*
+  `unserialize()` is `return Json::decode($v)` (json_decode → scalars/arrays only, no object
+  instantiation); source is admin-set key material behind `administer keys`. Name collision. FP.
+- **betterupload** `file.inc:74` "code injection" — `call_user_func_array('file_'.$toolkit.'_'.$method,…)`
+  where `$method` is always a hard-coded literal (`create_url`/`check_upload`/…), `$toolkit` is a
+  server-registered toolkit, and the name is `function_exists`-gated; request input reaches only the
+  args. Non-routable `.inc`, reached behind `upload files` permission. FP (legacy D5/6).
+- **inline_entity_form** `ElementSubmit.php:109` "code injection" — `call_user_func_array($cb,…)` over
+  `#ief_element_submit`, a Form API render-array property set by IEF's own PHP (server-side), not
+  request input; inside authenticated entity add/edit forms. Framework dispatch. FP.
