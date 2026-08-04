@@ -124,6 +124,19 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   fixed `selectSingle` allow-lists (name/image/crdate/…, ASC/DESC) — editor config, not request.
   `pointer` is `(int)`-cast. Anonymous FE plugin, but the injectable inputs aren't request-reachable.
 
+## Reflected-XSS flags killed by response Content-Type / unwired library entry
+- **jvelletti/jvchat 13.4.1** — the reflected sinks are FP: `Chat.php:689` is a JSONP
+  `callback` echo under `application/json`; `:980` is an `application/xml` `<![CDATA[]]>`
+  envelope (not executed on navigation); `JvchatEid.php:41/48` is unregistered dead code; eID
+  DB access is int-cast + parameterized QueryBuilder. (The chat-message **stored** XSS is a real
+  auth-gated finding — see CONFIRMED_VULNS.md authenticated section.)
+- **jambagecom/taxajax 1.4.0** — ships the xajax **library**; registers no handler and never
+  calls `processRequests()`/`printJavascript()` (consumer-invoked). `XajaxHandler.php:117`
+  `trigger_error` goes to the log not the response; `class.tx_taxajax.php:672/710` are
+  `text/xml`/library API with no in-extension caller. Latent defects (unescaped `]]>` in CDATA;
+  raw request-URI into an inline `<script>` in `getJavascriptConfig`) require a consumer to wire
+  the library + a same-origin xajax client — not a request→executing-sink chain as shipped. FP.
+
 ## Recurring FP shapes → generic query improvements to make (feeds codeql-php work)
 1. **Code-injection on dynamic dispatch must require the METHOD/CLASS NAME to be tainted**,
    not just an argument. A `'get'.ucfirst($x)` / `method_exists`-guarded / literal-`switch`

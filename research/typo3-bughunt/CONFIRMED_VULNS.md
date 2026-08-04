@@ -266,6 +266,17 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - extcode/cart: negative cart quantities (hardening gap).
 
 ### Authenticated / not pre-auth, but real (out of primary scope, recorded for completeness)
+- **jvelletti/jvchat 13.4.1 — authenticated (FE-user) stored XSS → moderator/superuser
+  session theft.** Posting is gated on a logged-in frontend user (`checkAccessToRoom`), but
+  chat self-registration is typical. The `m` message param (`Chat.php:124`) escapes only
+  `<`/`>`, leaving `"` `'` `[` `]`; stored raw, then `LibUtility::formatMessage`
+  (`LibUtility.php:271`) rebuilds an `<img src="\2" onclick="…">` tag from `[img=..]` BBCode
+  with no quote-escaping, emitted via `<f:format.raw>` (`GetMessages.html`) and injected with
+  `innerHTML` by `tx_jvchat.min.js`. Payload
+  `m=[img=x]a" onerror="alert(document.cookie)" x="[/img]` fires in **every room member's**
+  browser (moderators/superusers included) on their `a=gm` poll → cookie theft / privileged
+  takeover. Reflected-XSS CodeQL hits in the same files are FP (JSON/XML content-type; the
+  legacy `JvchatEid.php` is unregistered dead code). Med–High (auth-gated).
 - **gdpr-extensions-com/* `GdprManagerController::uploadImageAction` — backend editor → RCE
   (×~19 near-identical extensions).** `$_FILES['image']['name']` → `pathinfo(…,EXTENSION)`
   (`:302`) → `move_uploaded_file` into `fileadmin/user_upload/two_click_solution/<md5>.<ext>`
