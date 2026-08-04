@@ -31,3 +31,18 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   => TRUE`, but the callback re-checks `user_access('view imagecache '.$preset)` **and** runs
   `hook_file_download` on the source path (`imagecache.module:416`) — the standard private-file
   access re-check — returning 403 otherwise. No bypass. FP.
+
+## Auth modules that correctly delegate to vetted libraries (safe by default)
+- **simple_oauth** — `/oauth/token`,`/oauth/authorize` delegate to `league/oauth2-server`
+  (redirect_uri exact-match, PKCE, code single-use inside the lib); client secret via
+  `password_verify` (constant-time), scope escalation rejected. FP.
+- **samlauth** — `/saml/acs` delegates to `onelogin/php-saml`; ships `strict: true` +
+  `security_messages_sign: true` by default → unsigned/invalid assertions rejected (XML-sig-wrapping
+  handled by the lib). NEEDS-CONFIG only if an admin disables strict/signing. FP by default.
+- **jwt** — no anonymous route (only `/admin/config/system/jwt`, `administer jwt`); algorithm pinned
+  via `Firebase\JWT\Key($key,$algorithm)` from config (not the token header) → no alg=none / HS↔RS
+  confusion. FP.
+- **openid_connect** — RP callback is `state`-token gated (session, single-use); id_token is fetched
+  over the TLS back-channel (unsigned parse is OIDC-§3.1.3.7-compliant). Email account-linking exists
+  but only when the **default-off** `connect_existing_users` is enabled → NEEDS-CONFIG, not
+  default-vulnerable (contrast social_auth #3, which has no toggle).

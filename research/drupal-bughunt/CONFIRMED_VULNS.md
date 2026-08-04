@@ -38,3 +38,24 @@ legacy/abandoned cluster (CodeQL pipeline running).
   and any (no in-tree) webhook-process hook implementors. When configured, comparison is
   `hash_equals` against a per-site `md5(uniqid(mt_rand(),TRUE))` secret — secure.
 - **Fix:** fail closed — require a configured `webhook_hash` (reject if unset).
+
+## 3. social_auth `user/login/{network}/callback` — MEDIUM/HIGH (provider-dependent) — pre-auth account takeover via unverified-email linking (ORIGINAL)
+- **Entry (pre-auth):** `_access: 'TRUE'` → `OAuth2ControllerBase::callback`. OAuth `state`/PKCE are
+  correctly validated (from session), and token exchange is delegated to `league/oauth2-client` —
+  those are **not** the issue.
+- **Cause:** after a successful provider round-trip, `UserAuthenticator::authenticateWithEmail()`
+  (`src/User/UserAuthenticator.php:223-248`) does `loadUserByProperty('mail', $providerEmail)` and,
+  if any Drupal user has that email, calls `authenticateExistingUser($drupal_user)` — logging the
+  caller into that account. There is **no `email_verified` claim check** (grep: the string appears
+  nowhere in `src/`) and **no config toggle** gating the behaviour (unlike openid_connect's
+  default-off `connect_existing_users`). The module trusts the email from *every* configured
+  provider unconditionally.
+- **Exploit:** on a site with any social-login network whose provider lets a user set/return an
+  **unverified** email, the attacker sets their provider-account email to the victim's Drupal email,
+  completes the OAuth flow in their own browser (so `state` is satisfied), and is logged in as the
+  victim. uid 1 and blocked/roleless accounts are excluded, but ordinary accounts are takeable.
+- **Impact:** pre-auth account takeover, **provider-dependent** (mainstream IdPs that enforce
+  verified email are safe; providers permitting unverified/arbitrary emails are not — and the module
+  makes that an all-or-nothing trust decision the operator can't scope).
+- **Fix:** require an `email_verified`/equivalent claim (or a per-network "emails are verified" trust
+  flag) before linking to an existing account by email.
