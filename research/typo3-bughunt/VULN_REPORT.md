@@ -1655,6 +1655,58 @@ same integer-guarded query code as Fork A. All request-derived values entering
 raw `TYPO3_DB` queries are integer-cast or integer-validated. **No confirmed
 pre-auth SQL injection.**
 
+### creativekallol_ck-faq
+
+#### Target A — creativekallol_ck-faq — `FaqRatingViewHelper.php:59`
+
+## Verdict: **CONFIRMED pre-auth PHP object injection (POI)**
+
+Attacker-controlled cookie bytes reach a raw `unserialize()` with **no `allowed_classes` restriction**, rendered by an anonymous frontend plugin.
+
+## Source → sink chain
+
+`Classes/ViewHelpers/FaqRatingViewHelper.php`
+```
+:52   $cookieName = 'faq_rating_' . $faqId;          // $faqId = (int) faq.uid
+:54   if (empty($_COOKIE[$cookieName])) return '';    // SOURCE: $_COOKIE (attacker-controlled)
+:58   $decoded = urldecode($_COOKIE[$cookieName]);
+:59   $cookie  = @unserialize($decoded);              // SINK: raw unserialize of attacker bytes
+:61   if (!is_array($cookie) || empty($cookie['rate'])) return '';
+```
+
+The cookie name is fully predictable: `faq_rating_<uid>` where `<uid>` is the FAQ record UID rendered on the page. The value is 100% attacker-controlled (browser cookie), passed through `urldecode()` then directly into `unserialize()`.
+
+## allowed_classes: **NOT set (raw)**
+
+`@unserialize($decoded)` — the leading `@` only suppresses PHP warnings; it does **not** restrict object instantiation. No `['allowed_classes' => false]` second argument. So arbitrary object graphs are instantiated → object-injection primitive is real. The subsequent `is_array()` check happens *after* unserialize has already constructed the objects, so `__wakeup`/`__destruct` side effects fire regardless of the array check.
+
+## Gadget
+
+No `__destruct` / `__wakeup` / `__toString` gadget exists inside ck-faq itself (grep clean). This does not reduce severity: the extension targets **TYPO3 v13.4**, whose runtime (TYPO3 core, Symfony components, Guzzle, doctrine, etc.) routinely ships POP-chain gadgets. The extension provides the injection primitive; the surrounding platform provides gadgets. Flagged as a confirmed primitive.
+
+## Reachability / auth level: **anonymous frontend (pre-auth)**
+
+- `ext_localconf.php` registers plugin `CkFaq/Pi1` (`FaqController::list`) as a `PLUGIN_TYPE_CONTENT_ELEMENT`.
+- `Resources/Private/Templates/Faq/List.html:50` renders the sink for **every FAQ in the list**:
+  ```
+  {namespace ckfaq=Creativekallol\CkFaq\ViewHelpers}
+  <f:variable name="rating" value="{ckfaq:faqRating(faqId: faq.uid)}" />
+  ```
+- Any page containing the FAQ list content element renders this ViewHelper once per FAQ. No login, no token, no session required — the ViewHelper reads `$_COOKIE` directly. Reached by any anonymous visitor whose request carries the crafted cookie.
+
+## Trigger
+
+Visit any page showing the FAQ list plugin with a crafted cookie for one of the listed FAQ UIDs (e.g. UID 1):
+```
+Cookie: faq_rating_1=<urlencoded serialized payload>
+```
+e.g. a raw object-injection probe: `faq_rating_1=O%3A8%3A%22stdClass%22%3A0%3A%7B%7D` (`O:8:"stdClass":0:{}`). Replace `stdClass` with any gadget class available in the TYPO3 v13 runtime to drive a POP chain.
+
+## Version
+
+- ck-faq **1.0.0** (state: stable), `ext_emconf.php`.
+- TYPO3 constraint: `typo3 => 13.4.0-13.4.99`.
+
 ### cundd_rest
 
 #### cundd/rest — CodeQL "Code injection" @ DataProvider.php:177 / :182
@@ -3923,6 +3975,57 @@ Rendered data is editor-curated bibliography records; anonymous create/edit is b
 
 *(Identical source to `subugoe_bib`; see `subugoe_bib.md` for the same analysis.)*
 
+### jambagecom_tt-products
+
+#### Target B — jambagecom_tt-products — 4 unserialize sinks
+
+## Verdict: **DB-sourced — NOT a pre-auth object-injection primitive (weak / not injectable)**
+
+All four named sinks `unserialize()` columns (`status_log`, `orderData`) read from the `sys_products_orders` database table. The serialized bytes are written by the extension itself via `serialize()` of server-constructed arrays. An attacker can influence *which row* is read (via `trackingCode`) but **not the serialized bytes**. Not raw attacker bytes → not a POI primitive.
+
+## Sink-by-sink chain
+
+### 1. `Classes/Controller/WithdrawalController.php:118`
+```
+:110  $orderRow = $this->orderRepository->findRowByTrackingCode($trackingCode);   // DB SELECT * FROM sys_products_orders
+:117  if (!empty($orderRow['status_log'])) {
+:118      $statusLog = unserialize($orderRow['status_log']);                      // SINK: DB column, raw (no allowed_classes)
+```
+`OrderRepository::findRowByTrackingCode()` (`Classes/Domain/Repository/OrderRepository.php:77`) does `select('*')->from('sys_products_orders')->where(tracking_code = :trackingCode)`. `status_log` is a DB column serialized server-side (see `:147` `serialize($statusLog)` write-back in the same file). **DB-sourced.**
+
+### 2 & 3. `lib/class.tx_ttproducts_tracking.php:255` and `:428`
+```
+:255  $status_log = unserialize($orderRow['status_log']);   // $orderRow from sys_products_orders
+:425  $orderRow = $orderObj->getRecord($orderRow['uid']);   // re-fetch DB record
+:428  $status_log = unserialize($orderRow['status_log']);   // DB column again
+```
+`$orderRow` is a `sys_products_orders` DB record (`$orderObj = $tablesObj->get('sys_products_orders')`, `getRecord($uid)`). `status_log` written via `serialize($status_log)` at `:409`. **DB-sourced.** (A third occurrence at `:578` `unserialize($row['status_log'])` is likewise a DB row.)
+
+### 4. `model/class.tx_ttproducts_order.php:797`
+```
+:791  public function getOrderData($row) {
+:797      $orderData = unserialize($row['orderData']);          // DB column `orderData`
+:801      $orderData = SystemUtility::unserialize($row['orderData'], false);  // fallback
+```
+`$row` is a `sys_products_orders` record; `orderData` is written by this same class via `serialize([...])` at `:540` and `:580`. **DB-sourced.**
+
+## allowed_classes
+
+Sinks 1–3 and the primary call in sink 4 are **raw** `unserialize()` (no `allowed_classes`). This would matter *if* the bytes were attacker-controlled — they are not. The fallback at `:801` passes `false` as the 2nd argument (not a valid options array; effectively no class restriction), again moot given the DB source.
+
+## Why not exploitable as pre-auth POI
+
+The `orderData` / `status_log` columns are populated exclusively by `serialize()` of server-assembled arrays during checkout/order-tracking. A frontend visitor supplies only scalar form values, which `serialize()` encodes as **strings nested inside** the array — there is no path for a visitor to inject standalone serialized-object bytes into the column. Turning any of these into POI would require a *separate* write primitive (e.g. SQL injection allowing an arbitrary `status_log`/`orderData` value), which is out of scope here. Absent that, these are DB-sourced and not directly injectable.
+
+## Reachability / auth
+
+The withdrawal and tracking flows are reachable by anonymous frontend visitors (order tracking by `tracking_code`), but reachability does not upgrade severity because the unserialized bytes are not attacker-controlled.
+
+## Version
+
+- tt-products **2.16.11** (state: stable), `ext_emconf.php`.
+- TYPO3 constraint: `typo3 => 12.4.0-12.4.99` (also depends on `typo3db_legacy`, `div2007`, `table`).
+
 ### jweiland_events2
 
 #### Security Audit — jweiland/events2
@@ -4001,6 +4104,48 @@ Rendered data is editor-curated bibliography records; anonymous create/edit is b
 - No public CVE / TYPO3-EXT-SA advisory is known to affect **events2 10.2.10** (current release for TYPO3 v13.4, 2025).
 - The code shows the defensive patterns that historically hardened this extension: the frontend event-management flow is fully gated behind `RestrictAccessEventListener`, newly created events are force-hidden pending editor activation, and all AJAX/search DB access is parameterized. No regression of those mitigations was found.
 - Recommendation: track the `jweiland-net/events2` GitHub security advisories feed; nothing in this version requires remediation for the pre-auth threat model.
+
+### lochmueller_fl_realurl_image
+
+#### Target C — lochmueller_fl_realurl_image — `RealUrlImage.php:110`
+
+## Verdict: **FALSE POSITIVE (cache/server-sourced) — not a pre-auth object-injection primitive**
+
+The `unserialize()` operand comes from the extension's own TYPO3 caching-framework cache (`fl_realurl_image`), whose values are written server-side via `serialize()`. The attacker controls the cache *key* (derived from the request URL) but **not the serialized bytes**. Not raw attacker bytes → not POI.
+
+## Source → sink chain
+
+`Classes/RealUrlImage.php`, `showImage()`
+```
+:103  $path = str_replace(TYPO3_SITE_URL, '', TYPO3_REQUEST_URL);   // attacker influences the KEY only
+:104  $path = trim($path, '/');
+:105  $cacheIdentifier = $path;
+:107  $cache = $this->getCache();                                   // CacheManager->getCache('fl_realurl_image')
+:108  if ($cache->has($cacheIdentifier)) {
+:110      $data = unserialize($cache->get($cacheIdentifier), FALSE); // SINK: value is server-written
+```
+The cache is populated only by this class:
+- `writeDB()` → `:526 $cache->set($cacheIdent, serialize($data))` where `$data` is a server-built array (crdate/tstamp/image_path/new_path/page_id).
+- `showImage()` → `:120 $cache->set($cacheIdentifier, serialize($data))`.
+
+`$data` never contains attacker-supplied serialized-object bytes; the values are file paths, page IDs and timestamps assembled server-side. The `fl_realurl_image` cache uses the standard TYPO3 caching framework (DB/typo3temp backend) — a server-side store. **Cache/server-sourced.**
+
+## allowed_classes: second argument is `FALSE`
+
+`unserialize($cache->get($cacheIdentifier), FALSE)` passes `FALSE` as the `$options` parameter. `$options` expects an array such as `['allowed_classes' => false]`; a bare boolean is not the documented form and does **not** impose a class allowlist (it does not equal `['allowed_classes' => false]`). So this is effectively an unrestricted unserialize. It is nonetheless not exploitable here because the bytes are not attacker-controlled.
+
+## Gadget
+
+Not applicable — no attacker-controlled bytes reach the sink, so no gadget analysis is warranted for this path.
+
+## Reachability / auth
+
+`showImage()` is an emergency handler that runs on the frontend (pre-auth) when a realurl image is requested and the static file cache is missing. It is reachable by anonymous visitors, but reachability does not create a POI because the unserialized value is server-written cache content, not request bytes. To weaponize this, an attacker would need a *separate* cache-poisoning primitive letting them place arbitrary serialized bytes under a key equal to the request path — not present in this code.
+
+## Version
+
+- fl_realurl_image **6.0.1** (state: stable), `ext_emconf.php`.
+- TYPO3 constraint: `typo3 => 12.4.0-12.4.99`, `php => 8.3.0+`.
 
 ### oliverklee_realty
 
@@ -4676,7 +4821,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 699 raw -> 636 after noise filter
+# 872 raw -> 666 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22
@@ -4706,6 +4851,9 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] Code injection       madj2k_t3-cat-search         Classes/Controller/AbstractSearchController.php:271
 [CRIT] Code injection       madj2k_t3-cat-search         Classes/Controller/AbstractSearchController.php:273
 [CRIT] Code injection       maikschneider_tca-api        Classes/Security/AccessController.php:26
+[CRIT] SQL injection        mia3_mia3_categories         Classes/Controller/CategoryController.php:48
+[CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:207
+[CRIT] Server-side request  mittwald_typo3_forum         Classes/Controller/AbstractController.php:211
 [XSS ] Reflected XSS        ehaerer_eh-bootstrap         Classes/Eid/ExtbaseDispatcher.php:155
 [XSS ] Reflected XSS        bytebuilders_t3clickmark     Classes/Middleware/InjectWidgetMiddleware.php:85
 [XSS ] Reflected XSS        jambagecom_taxajax           Classes/Middleware/XajaxHandler.php:117
@@ -4715,7 +4863,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/JvchatEid.php:41
 [XSS ] Reflected XSS        jvelletti_jvchat             Classes/Eid/JvchatEid.php:48
 [CRIT] Code injection       adgrafik_fal-ftp             Resources/Private/Script/.FalFtpRemoteService.php:18
-[CRIT] Code injection       ameos_ameos_form             Classes/Domain/Repository/Trait/SearchableRepository.php:20
-[CRIT] Code injection       ameos_ameos_form             Classes/Domain/Repository/Trait/SearchableRepository.php:49
-[CRIT] Code injection       aoe_extracache               modfunc1/class.tx_extracache_modfunc1.php:73
 ```

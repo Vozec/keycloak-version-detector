@@ -186,6 +186,24 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
   `usedfields`) — a common self-service config. SQLi/IDOR paths are `fullQuoteStr`/session-uid
   bound (clean). Fix: allow-list submitted group uids.
 
+## 6. creativekallol/ck-faq 1.0.0 (CURRENT, TYPO3 v13.4) — HIGH — pre-auth PHP object injection via cookie (ORIGINAL / 0-day)
+- **Sink:** `Classes/ViewHelpers/FaqRatingViewHelper.php:59`
+  `$cookie = @unserialize(urldecode($_COOKIE['faq_rating_'.$faqId]))` — **raw unserialize of a
+  fully attacker-controlled cookie**, no `['allowed_classes'=>false]`; the `@` only mutes
+  warnings and the `is_array()` check runs **after** unserialize, so `__wakeup`/`__destruct`
+  already fire on any injected object.
+- **Entry (pre-auth):** the anonymous `Pi1` FAQ plugin (`ext_localconf.php:19` configurePlugin,
+  `FaqController::list`) renders `{ckfaq:faqRating(faqId: faq.uid)}` for **every** listed FAQ
+  (`Resources/Private/Templates/Faq/List.html:50`). Cookie name is predictable (`faq_rating_<uid>`,
+  uid = the FAQ record's uid). No login/token.
+- **Exploit:** on any page with the FAQ list plugin, send
+  `Cookie: faq_rating_1=<urlencoded serialized POP-gadget object>` → object instantiated at
+  unserialize. No gadget ships in ck-faq itself, but it targets **TYPO3 v13.4**, whose runtime
+  (core / Symfony / Guzzle / doctrine) commonly provides POP chains → the extension supplies the
+  injection primitive. PoC scalar: `faq_rating_1=O%3A8%3A%22stdClass%22%3A0%3A%7B%7D`.
+- **Verdict:** confirmed pre-auth object-injection primitive in a current stable release. No CVE.
+  Fix: `unserialize($x, ['allowed_classes'=>false])` (it only needs the `rate` scalar anyway).
+
 ---
 
 ## 7. caretaker/caretaker 1.0.3 — MEDIUM — pre-auth eID auth bypass → monitoring info disclosure (ORIGINAL)
