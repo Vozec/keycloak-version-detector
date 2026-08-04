@@ -124,6 +124,19 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   fixed `selectSingle` allow-lists (name/image/crdate/…, ASC/DESC) — editor config, not request.
   `pointer` is `(int)`-cast. Anonymous FE plugin, but the injectable inputs aren't request-reachable.
 
+## More dynamic-dispatch / assert FPs (argument-only or non-sink)
+- **madj2k/t3-cat-search 13.4.1** — `$search->$setter($value)` (`AbstractSearchController.php:271`),
+  `method_exists`-guarded on a `final Search` DTO; request controls only the argument → mass-assign,
+  not RCE.
+- **oliverklee/seminars 6.0.x** — the 5 flagged lines are `\assert($x instanceof C)` (boolean
+  type-asserts, not `assert('code')`) and `array_map([$this,'pi_getClassName'],…)` (constant
+  callable). No dynamic sink.
+- **pixelant/pxa-pm-importer 2.0.1** — `$this->{$action}($request)` with request-controlled
+  `$action`, but bounded to the controller's own 4 methods AND the route is **backend**
+  (`Configuration/Backend/AjaxRoutes.php`, `be_user`). Not FE, not arbitrary-callable.
+- **maikschneider/tca-api 0.6.2** — `makeInstance($class)->$method(...)` where `[$class,$method]`
+  is a build-time-validated developer-config checker tuple; request flows only as arguments.
+
 ## Reflected-XSS flags killed by response Content-Type / unwired library entry
 - **jvelletti/jvchat 13.4.1** — the reflected sinks are FP: `Chat.php:689` is a JSONP
   `callback` echo under `application/json`; `:980` is an `application/xml` `<![CDATA[]]>`
