@@ -36,6 +36,25 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   `htmlentities`-escaped, and the endpoint is backend-only; the frontend AJAX path is
   `application/json`.
 
+## Command-injection where every dynamic component is shell-escaped
+- **dmk/webkitpdf 13.0.1** — `Plugin.php:310` `exec($this->scriptCall)`. The request-controlled
+  target URL (`tx_webkitpdf_pi1[urls][]`) is host-allow-listed to the site's own host AND
+  `escapeshellarg`'d in `Utility::sanitizeUrl` (`Utility.php:82`) before `implode(' ',$urls)`;
+  option values/cookies `escapeshellarg`'d, binary path `escapeshellcmd`'d, output filename
+  `escapeshellarg`'d. CodeQL missed the sanitizer because it lives in another file and returns
+  through a by-ref loop + intermediate array. No unescaped bytes reach the shell.
+
+## Path-traversal / LFI where the path is allow-listed or the sink isn't a filesystem op
+- **andersundsehr/ssi-include** — `InternalSsiRedirectMiddleware.php:37/61`
+  `file_get_contents($publicPath.'/typo3temp/tx_ssiinclude/'.$ssi_include)`. `ssi_include`
+  (pre-auth GET) is gated by anchored `^[a-zA-Z0-9_-]+\.html$` (no `.`/`/` in body) → HTTP 400
+  on any `../`. Flat filename in a fixed dir; no traversal survives.
+- **dla/dla_opac_ng** — `Ajax/Decisiontree.php:54/77` `file_get_contents(...)` is an **HTTP fetch
+  to a fixed env-configured Solr host** (`$host=getenv('SOLR_HOST')`), not a filesystem read;
+  request input lands only after `?` in the query string. Not LFI. (Minor real issue, out of
+  scope: `relation1/2` are concatenated un-urlencoded → Solr request-parameter injection within
+  the fixed host.)
+
 ## SQL-injection where the flagged concat is actually escaped / parameterized
 - **helhum/realurl 2.1.8** — `UrlRewritingHook.php:769/1701`. The decoded URL path *is*
   attacker input, but it reaches the sink only via `INSERTquery`→`fullQuoteArray` /
