@@ -108,6 +108,42 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
   and `skeyword` uses `addslashes`, so `price_filter` is the outlier.
 
 
+## 8. chrisgruen/realty-manager 4.0.0 (TYPO3 v10 LTS) — CRITICAL — two pre-auth SQL injections (ORIGINAL / 0-day)
+- **Entry:** the `RealtyManager` Extbase frontend plugin — any anonymous visitor on
+  the page hosting it. Actions registered `ext_localconf.php:20`:
+  `list, form, search, detail, ajaxselectdistrict, ajaxsearch`.
+- **SQLi #1 — `ajaxselectdistrict` (cleanest, quoted break-out):**
+  `RealtyManagerController::ajaxselectdistrictAction()` reads `$_GET['cityId']`
+  directly (`RealtyManagerController.php:240`) → `ObjectimmoRepository::getDistricts()`
+  (`ObjectimmoRepository.php:170-177`) builds
+  `"SELECT uid, title from … WHERE city = '" . $city_id . "' order by title"` and
+  runs it via `executeQuery($sql)` — **raw string, single-quoted, no
+  parameterization**. Exploit:
+  `?…[action]=ajaxselectdistrict&cityId=0' UNION SELECT username,password FROM be_users-- -`.
+- **SQLi #2 — `search`/`list`/`ajaxsearch` (unquoted numeric):**
+  `getAllObjectsBySearch($form_data)` (`ObjectimmoRepository.php:23`) takes
+  `house_type, apartment_type, employer, city, district` from the request and
+  concatenates them **unquoted** into `$add_where` (`… AND house_type = '.$house_type`,
+  lines 42-46). The only gate is `if($house_type > 0)` — bypassed by a digit-leading
+  payload (`'5 UNION…' > 0` is true under PHP loose compare). `rent_*`/`living_area_*`
+  are `is_numeric`-guarded, so those five columns are the injectable outliers.
+- **Verdict:** confirmed unauthenticated SQLi (full DB read incl. `be_users` hashes).
+  Abandoned/small extension, no CVE. `getDistricts` is the trivial PoC.
+
+## 9. azich/direct-mail 6.0.0-dev (fork) — MEDIUM — pre-auth authCode-inversion → recipient/PII enumeration (ORIGINAL, fork regression)
+- **Entry (pre-auth):** `eID=tx_directmail` → `Classes/Middleware/JumpurlController.php`.
+- **Cause:** `validateAuthCode()` (`JumpurlController.php:312-330`) has **inverted
+  logic** — it throws the "invalid auth code" exception only when the submitted `aC`
+  **matches**, so an empty/wrong `aC` passes for any `mid`/`rid`. This defeats the
+  per-recipient jumpUrl auth code entirely.
+- **Impact:** an anonymous attacker iterating `rid=t_1,t_2,…` / `f_1,…` gets each
+  recipient's `###USER_email###` / name markers resolved into the redirect `Location`
+  → subscriber e-mail/PII enumeration. Would be HIGH (FE auto-login/ATO via
+  `performFeUserAutoLogin`) but that sink is dead due to a `fe_user` vs `fe_users`
+  constant typo (`:40` vs `:412`). PoC: `?eID=tx_directmail&mid=1&rid=t_1&jumpurl=0&aC=`.
+- Fork-specific: mainline `directmailteam/direct-mail` 9.5.2 has correct polarity and
+  the TYPO3-EXT-SA-2020-005 (CVE-2020-12699/12700) fixes.
+
 ---
 
 ## 7. caretaker/caretaker 1.0.3 — MEDIUM — pre-auth eID auth bypass → monitoring info disclosure (ORIGINAL)
