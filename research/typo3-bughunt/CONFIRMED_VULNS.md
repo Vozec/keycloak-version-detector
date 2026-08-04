@@ -46,6 +46,33 @@ source. Ordered by severity. "Original" = no public CVE/advisory found.
 - **Impact > if_basic:** Formhandler is a widely-installed form builder, so the
   exposure is broad. No CVE on record.
 
+## 1d. dmk/mkforms 12.0.5 (CURRENT, TYPO3 11.5–12.4) — HIGH/CRITICAL — pre-auth unrestricted file upload → RCE (ORIGINAL / 0-day, widely-used form builder)
+- **Defect:** the `UPLOAD` and `MEDIAUPLOAD` widgets preserve the attacker-controlled
+  client filename+extension and hand it straight to the move, with **no core
+  `fileDenyPattern` check and no built-in extension allow-list** — whereas the sibling
+  `SWFUPLOAD` widget *does* call `verifyFilenameAgainstDenyPattern()` by default
+  (`swfupload/…Main.php:146`). The asymmetry is the bug.
+  - `UPLOAD`: `basename($aData['name'])` (`widgets/upload/…Main.php:188`) → `$sTargetDir.$sName`
+    (`:193`) → `move_uploaded_file(…, $sTarget)` (`:215`). `cleanupFileName()` only rewrites
+    characters, **never the extension** (`shell.php`, `.phtml`, `.php5`, `shell.php.` all survive).
+  - `MEDIAUPLOAD`: `$aData['name']` (`:283`) → `move_uploaded_file` (`:327`) — raw move happens
+    **before** any FAL indexing/rename; also reachable via a dedicated AJAX endpoint
+    (`handleAjaxRequest` `:784`, registered `ext_localconf.php:115`).
+- **Entry (pre-auth):** any public page rendering an mkforms form with these widgets; normal
+  anonymous multipart submit runs `manageFile()` at checkpoint `after-init-datahandler`.
+  MEDIAUPLOAD also via `/?mkformsAjaxId=<eid>&object=widget_mediaupload&servicekey=upload&…`
+  (the `safelock` is satisfied merely by having rendered the form — no login).
+- **Exploit:** submit the form with a file part `filename="shell.php"` (`<?php system($_GET[c]);?>`)
+  → written verbatim to the form's `targetdir` → GET it → code execution.
+- **Contingency (honest):** RCE requires the form's author-configured `/data/targetdir` to be
+  a web-reachable, PHP-executing dir (typical `uploads/…`, `fileadmin/…`) and no optional
+  `validator:FILE /extension` allow-list declared (and that validator is post-move cleanup
+  anyway — TOCTOU). Where PHP-exec is blocked it degrades to arbitrary file write / stored-XSS
+  (`.svg`/`.html`). SWFUPLOAD is hardened (deny-pattern on by default) unless the form sets
+  `<usedenypattern>false</usedenypattern>`.
+- **Fix:** enforce `verifyFilenameAgainstDenyPattern()` before the move in UPLOAD/MEDIAUPLOAD too.
+  Same class as if_basic/formhandler, but in a maintained current release. No CVE on record.
+
 ## 1c. ameos/ameos_filemanager 3.1.2 (current, TYPO3 v13) — HIGH — pre-auth SQL injection + arbitrary file read (REGRESSION of TYPO3-EXT-SA-2017-008)
 - **SQLi (HIGH, pre-auth):** frontend file search. `ExplorerController` passes the
   request `query` param into `FileRepository::search()`, which does

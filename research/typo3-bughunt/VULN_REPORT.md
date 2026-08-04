@@ -906,6 +906,77 @@ The extension is current (TYPO3 v13) and actively maintained, not the vulnerable
 ## Conclusion
 The download/dump path and the `FalSecuredownloadFileTreeState` eID were traced end-to-end. Access control is enforced on every file-serving sink, file identity is by integer UID (no traversal), and tokens are encryptionKey-keyed HMACs (not forgeable). **No unpatched pre-auth arbitrary file read exists in v6.0.3.** Only the low/informational items F1–F3 above are concrete.
 
+### bitpatroon_bpn_request_access
+
+#### Security Audit — `bpn_request_access` (Bitpatroon "BPN Request access")
+
+- **Version:** 10.4.0 (`ext_emconf.php`; no explicit TYPO3 constraint — TYPO3 v10-era API, uses removed `TYPO3_DB`/`ObjectManager`)
+- **Base dir:** `/home/user/sources/code/typo3-extensions/bitpatroon_bpn_request_access/`
+
+## Pre-auth entry points
+
+| Entry | Wiring | Auth level |
+|-------|--------|------------|
+| `Eid\UserSearchEid` | `ext_localconf.php` → `eID_include['bpn_request_access_usersearch'] = extPath . 'Classes/Eid/UserSearchEid.php'` (a **file path**, not `Class::method`) | eID, but **requires a logged-in FE user** and is **non-functional as wired** (see Issue 1) |
+| `RequestAccessController` (Extbase plugin `RequestAccess`) actions `grantAccess` / `denyAccess` / `denyAccessWithFeedback` | `ext_localconf.php` `configurePlugin` (cached + non-cached) | **Unauthenticated FE** — these actions skip `ensureAuthorized()`; gated only by `verificationCode` |
+| `RequestAccessController` actions `requestAccessForm` / `requestAccess` | same plugin | Authenticated FE — call `ensureAuthorized()` (`:115,:149`) |
+
+---
+
+## Issue 1 — SQLi in `UserSearchEid` (`$_GET['q']` → `LIKE`) → **FALSE POSITIVE (unreachable + escaped + auth-gated)**
+
+Candidate sink:
+```
+UserSearchEid.php:38  $searchTerm = mysqli_real_escape_string($db->getDatabaseHandle(), $_GET['q']);
+UserSearchEid.php:48  ... name LIKE '%$searchTerm%' OR ... email LIKE '%$searchTerm%'
+UserSearchEid.php:53  $res = $db->sql_query($query);
+```
+Three independent reasons this is not exploitable:
+
+1. **Unreachable as wired.** The eID target is a plain **file path** with no `::`, so TYPO3's eID handler simply `require`s the file. The file only *declares* class `UserSearchEid` (methods `start()`/`determineRole()`) — there is **no procedural bootstrap** (`tail` of file ends at `}`; no `(new UserSearchEid())->start();`). `start()` is never invoked, so the query never executes. The `//todo` header and unqualified references (`FrontendUserGroupRepository`, `UsergroupHandle`, `ArrayFunctions` — no `use` imports, would fatal in namespace `BpnRequestAccess\Eid`) confirm the class is incomplete/dead code.
+2. **Not pre-auth even if invoked.** `start()` guards the whole body with `if (isset($this->feUser->user['uid']))` (`:31`) after `initFEuser()`; anonymous callers hit `http_response_code(401); die()`.
+3. **Input escaped.** `q` is passed through `mysqli_real_escape_string` (`:38`) before interpolation, neutralizing quote/backslash breakout inside the `LIKE`. Residual risk is only `%`/`_` LIKE-wildcard injection (search broadening), not SQL structure injection. (`$permWhere` at `:49` is an undefined variable — dead artifact, not attacker-controlled.)
+
+**Verdict:** FALSE POSITIVE — dead/unreachable eID, additionally auth-gated and escaped.
+
+---
+
+## Issue 2 — Auth bypass on `grantAccess` / `denyAccess` (token workflow) → **HARDENED (HMAC capability token)**
+
+These actions are the genuine unauthenticated surface (no `ensureAuthorized()`), reachable by any anonymous FE visitor:
+```
+RequestAccessController.php:194  grantAccessAction(string $verificationCode = '')
+RequestAccessController.php:208    $request = $accessService->getRequest($verificationCode);
+RequestAccessController.php:216    $accessService->grantAccess($verificationCode, $request);
+RequestAccessController.php:266  denyAccessWithFeedbackAction(...) -> getRequest() -> denyAccess()
+```
+Security of the whole flow rests on `verificationCode`. Analysis:
+
+- **Lookup is an exact parameterized match.** `AccessService::getRequest` → `RequestRepository::findOneByVerificationCode($code)` (Extbase magic finder → bound `verification_code = ?` within the storage pid). No SQLi. Returns `RESULT_REQUEST_NOT_FOUND` if absent and `RESULT_REQUEST_ALREADY_PROCESSED` if `request_result != UNVOTED` (single-use).
+- **Empty-token match blocked.** `grantAccessAction` throws on `!$verificationCode` (`:200`); `denyAccessAction`/`denyAccessWithFeedbackAction` throw on `empty($verificationCode)` (`:249`). So an empty code cannot match an empty-column row.
+- **Token is an unforgeable HMAC.** `VerificationCodeService::createVerificationCode` = `hash_hmac('sha256', $input . $expirationTime, $secureKey)` (64-hex), and `grantAccess` re-validates via `isValid()` = strict `hash_hmac(...) === storedHash` **and** not expired (`VerificationCodeService::isValid`). `$secureKey` is a **required** config value — `BpnRequestAccessConfiguration::initializeApplication` throws (`1619729031`) if `verificationCode.secureKey` is unset, so there is no empty/hardcoded-key default.
+- **Attacker cannot self-seed a row.** A valid code only enters the DB via `AccessService::createAccessRequest`, reachable solely through `requestAccessAction`, which is behind `ensureAuthorized()` (`:149`); and the generated code is emailed **only** to the examination admin (`sendRequestAccessEmail`), never rendered back to the requester. So an anonymous attacker can neither guess (SHA-256/HMAC) nor obtain the capability token, and cannot forge one that also exists in the DB.
+
+**Verdict:** HARDENED. The unauthenticated grant/deny actions are protected by a single-use, expiring, `secureKey`-bound HMAC token that is verified both by DB existence and by HMAC re-computation. No auth bypass.
+
+- **NEEDS-CONFIG note:** the entire model depends on the operator setting a strong, secret `plugin.tx_bpnrequestaccess.settings.verificationCode.secureKey` in TypoScript. It is mandatory (enforced) but weak/shared keys would weaken forgeability. Also recommend `hash_equals()` in `isValid` instead of `===` (timing hardening) — minor.
+
+## Issue 3 — Stored/reflected XSS (deny feedback / request title) → **FALSE POSITIVE (Fluid-escaped)**
+
+- `denyAccessWithFeedback` places attacker-suppliable `reason` into an email via `createViewClone(...)->assign('userRequestDeniedReason', $reason)` rendered through Fluid (auto HTML-escaped), and delivered only to the request source's own email. `verificationCode` echoed to `denyAccess` view is likewise Fluid-assigned. No raw HTML sink reached.
+
+---
+
+## Summary
+
+| Issue | Verdict |
+|-------|---------|
+| SQLi in `UserSearchEid` (`$_GET['q']`) | FALSE POSITIVE — dead/unreachable eID (no bootstrap), FE-auth-gated, `mysqli_real_escape_string` |
+| Auth bypass on `grantAccess`/`denyAccess` token flow | HARDENED — single-use expiring HMAC(`secureKey`) token, DB-existence + HMAC double check, empty-token blocked |
+| XSS via deny-reason / verification code | FALSE POSITIVE — Fluid auto-escaping, email-only sink |
+
+**No confirmed pre-auth vulnerability.** Caveats: security depends on a mandatory-but-operator-set `verificationCode.secureKey` (NEEDS-CONFIG); recommend `hash_equals` for the token compare. The `UserSearchEid` file is broken/dead code and should be removed or correctly wired+parameterized before any future use.
+
 ### brezo-it_multi-file-upload
 
 #### Security Audit — brezo-it/multi_file_upload
@@ -3916,6 +3987,93 @@ No `Location:` / `header()` redirect is emitted from user input. `link_pid`, `to
 | Open redirect | FALSE POSITIVE (no user-controlled Location) |
 | SSRF | FALSE POSITIVE (card_image_path cleared; mail HTML is htmlspecialchars-encoded) |
 
+### simonschaufi_ve_guestbook
+
+#### Security Audit — `simonschaufi/ve_guestbook` (Modern Guestbook)
+
+- **File audited:** `pi1/class.tx_veguestbook_pi1.php`
+- **Version:** 3.3.0 (`state = stable`) — `ext_emconf.php:20`
+- **TYPO3 compat:** `7.6.0 - 7.9.99` — `ext_emconf.php:27`
+- **Reachability:** Anonymous frontend plugin (`AbstractPlugin`). Two modes selected by FlexForm `what_to_display`: `LIST`/`TEASER` (renders stored entries) and `FORM` (anonymous submit). Any visitor on the hosting page can both submit and read entries. `FORM` mode is a `USER_INT` object with `pi_checkCHash = false` (`:160-161`).
+
+---
+
+## Issue 1 — Stored XSS via submitted entry fields → **CONFIRMED pre-auth stored XSS** (default config)
+
+### Tainted chain (store → persist → render)
+
+**Store** (`displayForm`, `:686-748`):
+- `:686` `$this->postVars = GeneralUtility::_GP('tx_veguestbook_pi1')` — raw request input (GET/POST).
+- `:690` each value passed through `$this->localContentObject->removeBadHTML($value)`.
+- `:732-738` for `db_fields = ['firstname','surname','email','homepage','place','entry','entrycomment']`, optional `strip_tags($v, $this->config['allowedTags'])` **only if** `allowedTags` TS is set (default `false`, `:222-226`), then `removeBadHTML($v)` again.
+- `:748` `exec_INSERTquery($this->strEntryTable, $saveData)` — INSERT is DBAL-quoted (no SQLi here), so the payload is persisted **as-is** into `tx_veguestbook_entries`.
+
+**Render** (`getItemMarkerArray`, `:516-582`, via `displayList` → `getListContent` → `substituteMarkerArrayCached`):
+- `:521` `###GUESTBOOK_FIRSTNAME###` = `cutDown($row['firstname'])` — truncation only, **no `htmlspecialchars`**.
+- `:522` `###GUESTBOOK_SURNAME###` = `cutDown($row['surname'])` — **no escaping**.
+- `:526` `###GUESTBOOK_PLACE###` = `cutDown($row['place'])` — **no escaping**.
+- `:568` `###GUESTBOOK_ENTRY###` = `nl2br($row['entry'])` — **no escaping**.
+- `:572` `###GUESTBOOK_ENTRYCOMMENT###` = `substituteEmoticons(nl2br($row['entrycomment']))` — **no escaping**.
+- `:538` `###GUESTBOOK_EMAIL###` = `trim($row['email'])` — **no escaping** (only the `_URL` variant at `:533` is `htmlspecialchars`'d; the plain email marker is not).
+
+**Sink:** `substituteMarkerArrayCached` (`:502`, `:364`) performs raw string substitution — no Fluid, no escaping. Markers land in HTML body context in `Resources/Private/Templates/template.html` (e.g. `:17` `<h2>###GUESTBOOK_FIRSTNAME### ###GUESTBOOK_SURNAME###...`, `:29` `<p>###GUESTBOOK_ENTRY###</p>`). **Output is HTML.**
+
+### Why the only mitigation (`removeBadHTML`) is ineffective
+`ContentObjectRenderer::removeBadHTML()` is a TYPO3 **blocklist cleanup**, explicitly not an XSS-safe sanitizer. It regex-strips `<script>/<iframe>/<object>/<style>/...` tags and tags containing an `on…=` event handler (`/<[^>]*[^a-z]on[a-z]*\s*=[^>]*(>|$)/`). It does **not** HTML-encode `<`/`>`/`"`, and is trivially bypassed. Canonical no-interaction bypass — insert a `>` inside an earlier attribute so the event-handler regex's `[^>]*` terminates before reaching `on…=`:
+
+```
+<img src="x" alt=">" onerror=alert(document.cookie)>
+```
+
+`removeBadHTML` fails to match/strip this, the browser fires `onerror`. `javascript:` URIs (e.g. in an `<a>`) are also untouched.
+
+### Exact trigger
+1. Visit the page hosting the plugin in `FORM` mode. POST the guestbook form:
+   ```
+   POST /index.php?id=<formPageId> HTTP/1.1
+   Content-Type: application/x-www-form-urlencoded
+
+   id=<formPageId>&tx_veguestbook_pi1[submitted]=1&tx_veguestbook_pi1[firstname]=<img src="x" alt=">" onerror=alert(document.cookie)>&tx_veguestbook_pi1[surname]=x&tx_veguestbook_pi1[entry]=hi
+   ```
+   (URL-encode the payload value.)
+2. Any visitor loading the `LIST`/`TEASER` page executes the script. Persistent, affects every viewer including logged-in backend users who preview the page.
+
+### Gating (severity modifiers — all optional, default OFF)
+- **CAPTCHA** (`sr_freecap` / `captcha`): only active if configured via FlexForm `captcha` (`:186`, `:824-833`), and only for non-logged-in submitters. A CAPTCHA blocks automated spam but **does not prevent** a human attacker from planting one persistent payload — it does not downgrade the stored-XSS.
+- **`manual_backend_release`** (FlexForm `s_form`, `:247`): if `== 1`, new entries get `hidden = 1` (`:726-728`) and are not displayed until a backend editor approves. **If enabled, this is an approval-before-display gate that downgrades the finding to "gated / requires moderator to approve the malicious entry."** Default is off → immediate display.
+
+**Verdict: CONFIRMED pre-auth stored XSS** in default configuration. Downgraded to *gated* only when `manual_backend_release = 1`.
+
+---
+
+## Issue 2 — Raw SQL in `displayList` (ORDER BY / WHERE / LIMIT) → **FALSE POSITIVE (no request input reaches SQL)**
+
+`displayList` builds two `exec_SELECTquery` calls with concatenated SQL (`:285`, `:351`):
+
+```php
+$temp_where = 'pid IN (' . $this->config['pid_list'] . ')' . $language_filter . $this->cObj->enableFields(...);   // :284,:349
+$orderBy = $this->config['sortingField'] . ' ' . $this->config['sortingDirection'];                                // :340
+$res = ...->exec_SELECTquery('*', $this->strEntryTable, $temp_where, '', $orderBy, $limit_start.','.$this->config['limit']); // :351
+```
+
+None of the concatenated parts derive from anonymous request input:
+- **`pid_list`** (`:167,:172`) — from FlexForm `pages` / `recursive`, passed through `GeneralUtility::intExplode` → integers. Admin/editor-controlled, not request.
+- **`language_filter`** (`:281`) — `sys_language_uid` from `frontendController->config['config']` (TypoScript), not request.
+- **ORDER BY `sortingField` / `sortingDirection`** (`:260-264`, `:340`) — from FlexForm `listOrderBy` / `ascDesc` (or TS fallback). This is the classic unquotable ORDER BY sink, **but the value is set by the backend editor in the plugin FlexForm, not by the anonymous visitor.** Not attacker-controllable.
+- **LIMIT** (`:343-351`) — `$limit_start = $this->piVars['pointer'] * $this->config['limit']`. `piVars['pointer']` is request input, but the arithmetic multiplication coerces it to a number in PHP, so no string reaches the SQL; `limit` is FlexForm/TS. Not injectable.
+
+**Verdict: FALSE POSITIVE.** The raw ORDER BY is FlexForm-driven (privileged config), and the pointer is numerically coerced. No anonymous request value reaches the SQL string.
+
+---
+
+## Summary
+
+| Issue | Verdict |
+|---|---|
+| Stored XSS (firstname/surname/place/entry/entrycomment/email) | **CONFIRMED pre-auth stored XSS** (default); *gated* if `manual_backend_release=1` |
+| Raw SQL in `displayList` (ORDER BY / WHERE / LIMIT) | **FALSE POSITIVE** — all SQL-concatenated values are FlexForm/TS-derived or numerically coerced |
+| SQLi on INSERT (submit path) | Not vulnerable — `exec_INSERTquery` is DBAL-quoted |
+
 ### smichaelsen_social-grabber
 
 #### Security Audit — `social_grabber` (Sebastian Michaelsen "Social Grabber")
@@ -4159,7 +4317,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 
 ## CodeQL mass-scan candidates (intra-extension, all 3350 exts)
 ```
-# 680 raw -> 617 after noise filter
+# 694 raw -> 631 after noise filter
 
 [CRIT] Code injection       erecht24_er24-rechtstexte    Classes/Controller/AjaxController.php:131
 [XSS ] Reflected XSS        caretaker_caretaker_instance Classes/Controller/EidController.php:22
@@ -4170,6 +4328,7 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] Code injection       jvelletti_jvchat             Classes/Eid/Chat.php:1085
 [CRIT] SQL injection        kitodo_presentation          Classes/Middleware/SearchInDocument.php:152
 [CRIT] SQL injection        kitodo_presentation          Classes/Middleware/SearchSuggest.php:64
+[CRIT] SQL injection        maispace_mai-faq             Classes/Middleware/FaqApiMiddleware.php:140
 [CRIT] Code injection       blueways_bw-bookingmanager   Classes/Controller/Backend/EntryListModuleController.php:30
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:299
 [CRIT] Command injection    friendsoftypo3_rtehtmlarea   Classes/Controller/SpellCheckingController.php:393
@@ -4184,6 +4343,10 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] SQL injection        liquidlight_module-data-list Classes/Controller/DatatableController.php:160
 [CRIT] SQL injection        liquidlight_module-data-list Classes/Controller/DatatableController.php:176
 [CRIT] SQL injection        liquidlight_module-data-list Classes/Controller/DatatableController.php:187
+[CRIT] Code injection       mabahe_typo3-core-redirects  Classes/Controller/ManagementController.php:94
+[CRIT] Code injection       madj2k_t3-cat-search         Classes/Controller/AbstractSearchController.php:271
+[CRIT] Code injection       madj2k_t3-cat-search         Classes/Controller/AbstractSearchController.php:273
+[CRIT] Code injection       maikschneider_tca-api        Classes/Security/AccessController.php:26
 [XSS ] Reflected XSS        ehaerer_eh-bootstrap         Classes/Eid/ExtbaseDispatcher.php:155
 [XSS ] Reflected XSS        bytebuilders_t3clickmark     Classes/Middleware/InjectWidgetMiddleware.php:85
 [XSS ] Reflected XSS        jambagecom_taxajax           Classes/Middleware/XajaxHandler.php:117
@@ -4196,9 +4359,4 @@ is compared against the affected range of publicly known TYPO3 Security Advisori
 [CRIT] Code injection       ameos_ameos_form             Classes/Domain/Repository/Trait/SearchableRepository.php:20
 [CRIT] Code injection       ameos_ameos_form             Classes/Domain/Repository/Trait/SearchableRepository.php:49
 [CRIT] Code injection       aoe_extracache               modfunc1/class.tx_extracache_modfunc1.php:73
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1955
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1956
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1957
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1989
-[CRIT] SQL injection        aoepeople_realurl            Classes/Realurl.php:1990
 ```

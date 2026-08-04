@@ -91,6 +91,21 @@ is fixed/whitelisted and the receiver is a concrete object — request controls 
   `pidList` via `intExplode`, `L` via `MathUtility::canBeInterpretedAsInteger`, `offset`/`limit`
   via `(int)`, `newsId`/`singlePid` via `intval`. No tainted string reaches raw SQL.
 
+- **ubl/supportchat 2.9.2** — pre-auth eID chat, but all DB access is `(int)`-cast / Extbase
+  `equals(int)`; message+username `htmlspecialchars`'d (`Chat.php:264`, `AjaxFrontendController.php:166`),
+  read-back is JSON; `createChatLog` is `text/plain`+attachment+`strip_tags`; chat access gated by
+  a secret `fe_typo_user`-cookie match with an empty-token guard. (Nits: loose `==`→`hash_equals`,
+  unauth `createChat` spam/DoS.) FP.
+- **smichaelsen/social_grabber 2.4.0** — eID OAuth handler gated by
+  `requestToken===hash('sha256',beUserUid.encryptionKey)` (strict, secret key), no DB touch,
+  static responses. The raw `exec_SELECTquery` in `FeedDataProcessor` is built from editor
+  FlexForm + DB channel rows (`intExplode`'d), not request input. Hardened/FP.
+- **bitpatroon/bpn_request_access 10.4.0** — the alarming `LIKE '%$q%'` in `UserSearchEid.php:48`
+  is **dead/unreachable** (eID points at a bare file that only declares the class, no bootstrap),
+  additionally FE-auth-gated and `mysqli_real_escape_string`'d. The unauth grant/deny actions are
+  gated by a single-use expiring `hash_hmac` verification code (parameterized lookup + HMAC
+  recompute, `===`, empty rejected), emailed only to the admin. Hardened/FP.
+
 ## Recurring FP shapes → generic query improvements to make (feeds codeql-php work)
 1. **Code-injection on dynamic dispatch must require the METHOD/CLASS NAME to be tainted**,
    not just an argument. A `'get'.ucfirst($x)` / `method_exists`-guarded / literal-`switch`
