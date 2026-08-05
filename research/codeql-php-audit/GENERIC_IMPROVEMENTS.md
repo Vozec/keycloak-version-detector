@@ -140,3 +140,24 @@ the pattern (arg 0) is a constant string whose trailing PCRE modifier flags incl
   → **no alert**. Exactly the intended split.
 
 Patch: `patches/preg-replace-e-sink.patch`.
+
+## 7. `$_SERVER` server-controlled keys are not attacker sources (mirrors the `getenv()` split)
+`$_SERVER` was modelled as a whole remote source, so `$_SERVER['SCRIPT_FILENAME']`,
+`['DOCUMENT_ROOT']`, `['PWD']`, `['SERVER_ADDR']`, … (SERVER/environment-controlled, not client-
+influenced) were treated as attacker input — flooding file/path/**include** sinks. Concretely: the
+pervasive fixed-path bootstrap `require $_SERVER['SCRIPT_FILENAME'] . '/…/bootstrap.inc'` (authcache
+front controller, advancedqueue_runner, and the whole File-inclusion FP cluster surfaced this round).
+The pack already did exactly this for `getenv()` (`GetenvSource` excludes TEMP/PATH/HOME…); this
+extends the same principle to `$_SERVER`.
+
+Fix: a `$_SERVER` read is a source UNLESS it is subscripted with a constant, clearly server-controlled
+key (`SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `CONTEXT_DOCUMENT_ROOT`, `PWD`, `SERVER_ADDR`, `SERVER_SOFTWARE`,
+`SERVER_ADMIN`, `SERVER_SIGNATURE`, `GATEWAY_INTERFACE`, `SERVER_PORT`, `SERVER_PROTOCOL`, `CONTEXT_PREFIX`,
+`REQUEST_TIME[_FLOAT]`). **Request-derived keys stay sources** (`REQUEST_URI`, `QUERY_STRING`, `HTTP_*`,
+`PHP_SELF`, `PATH_INFO`, `SERVER_NAME`, …); dynamic/absent keys and the bare array stay sources (conservative).
+- Bench: **RECALL 183/232 — unchanged**.
+- Micro-test: `include $_SERVER['SCRIPT_FILENAME'].'/x.inc'` / `echo $_SERVER['SERVER_SOFTWARE']` → **no
+  alert**; `include $_SERVER['PATH_INFO']` (LFI) / `echo $_SERVER['REQUEST_URI']` (XSS) → **alert**.
+- Corpus: authcache FileInclusion hits `frontcontroller.php:41,42` → **0** (the exact FP from this round).
+
+Patch: `patches/server-superglobal-key-split.patch`.
