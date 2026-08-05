@@ -250,3 +250,33 @@ legacy/abandoned cluster (CodeQL pipeline running).
   `GET /azure/remote/<azure_scheme>/path/to/private/secret.pdf` streams any blob in the container to an
   anonymous caller, bypassing Drupal's private-file access system. MED/HIGH. Fix: enforce a per-file
   access/token check like the image-style sibling.
+
+## 18. adaptive_image (Drupal 7) — MEDIUM/HIGH — pre-auth private-file (image derivative) disclosure (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `system/files/styles/%image_style/adaptive-image` (`access callback => TRUE`)
+  → `adaptive_image_style_deliver` → `adaptive_image.image.inc`.
+- **Cause:** for the `private` scheme, when the derivative is **already cached**
+  (`if (file_exists($derivative_uri))`, `:64`) it calls core `file_download($scheme, …)` (`:65`) but
+  **discards the return value**. `file_download()` on a denied request returns `drupal_access_denied()`
+  **without `exit()`**, so execution falls through to the unconditional `file_transfer($image->source, …)`
+  (`:105`) and streams the private image derivative. (The `else`/uncached branch `:70` correctly `return`s
+  — the bug is the cached-file shortcut.)
+- **Exploit:** `GET /system/files/styles/<style>/adaptive-image/private/path/secret.jpg` (with an
+  `adaptive_image` cookie matching a cached derivative) → anonymous read of a private image, bypassing
+  Drupal's private-file access. MED/HIGH.
+
+## 19. avantlinker (Drupal 7) — MEDIUM — pre-auth reflected XSS (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `avantlink-search-results` (`access callback => TRUE`) →
+  `avantlinker_product_import_display` → `avantlinker_api.inc`.
+- **Cause:** `$str_search_term_safe = check_plain($search_term)` (`:29`) is computed but **never used**;
+  the zero-results branch echoes the **raw** URL path arg: `$str_output .= "$search_term Search Term"`
+  (`:59`), rendered into the HTML page. Zero results are trivially forced (a payload matches nothing /
+  affiliate IDs unset). SSRF is a FP (fixed host `www.avantlink.com`).
+- **Exploit:** `GET /avantlink-search-results/<img src=x onerror=alert(document.cookie)>`. MED.
+
+## 20. api_source (Drupal, standalone) — MEDIUM — pre-auth source-code disclosure / access bypass (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `api/source/%/%` (`api_source.module:21`, **`access callback => TRUE`**)
+  → `api_source_megarow_callback($did, $type)` (`:30`) returns `$doc->code` — the member/function **source
+  code** indexed by the api.module — by numeric `did`, **bypassing** the api.module's `access API reference`
+  permission (which anonymous does not hold by default). SQLi is a FP (`api_object_load` uses parameterized
+  `db_select()->condition()`); `$doc->code` is server-pre-escaped (no XSS).
+- **Exploit:** `GET /api/source/123/function`, iterate `did` to dump the site's indexed PHP source. MED.

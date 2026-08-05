@@ -223,3 +223,12 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **amazons3_cors** `ajax/amazons3_cors` — returns a **scoped** S3 browser-upload policy (fixed bucket,
   server-side key-prefix+ACL, +5min expiry); no AWS secret in the JSON, and `ajax_get_form()` requires a
   valid `form_build_id` from a rendered widget. Not an open signing oracle. FP.
+
+## D7 anonymous callbacks — flagged primitive is FP (lower-severity residual noted)
+- **audiorecorderfield (D6)** `nanogong_file_receive` — anonymous upload, but `audiorecorderfield.module:64`
+  forces the name to `file_create_filename(time().'.wav')` before `file_save_upload` → always `<ts>.wav`
+  in the public dir; no attacker extension/traversal → no RCE. Residual: anonymous upload disk-fill DoS +
+  a minor `nanogong_preview` fid IDOR (parameterized `%d`). FP for RCE.
+- **ajaxchat (D7)** `ajaxchat_router` — bundled blueimp AJAX Chat glue; every SQL value goes through
+  `makeSafe()` (mysqli escape), output HTML-encoded, identity from the Drupal session (guest fallback by
+  design). No raw request→SQL/HTML sink. FP.
