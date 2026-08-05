@@ -5,15 +5,23 @@ verification-first discipline: every "CONFIRMED" was re-read in source; every cl
 logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
 
 ## Corpus & method
-- **Drupal core 11.x** + **~1000 contrib modules** (`git.drupalcode.org`, `--depth 1`, `.git` pruned).
-- **Two tracks:**
+- **Drupal core 11.x** + **~4,900 contrib modules** — the full canonical `git.drupalcode.org`
+  `project/` enumeration, cloned `--depth 1`, `.git` pruned (grown from an initial ~1,000).
+- **Three tracks:**
   1. **Access-bypass surface map** (`map_access_surface.py`) — enumerates public routes
-     (`_access: 'TRUE'` / anonymous `_permission`) and D7 `hook_menu` `access callback => TRUE`.
-     **207 public entry points** → hand-audited the non-test ones.
-  2. **CodeQL taint** — the improved `codeql-php` pack with an augmented Drupal model
-     (`Markup::create`/`SafeMarkup` XSS sinks, `Xss::filter`/`Html::escape` sanitizers), batch-run
-     over the corpus with the strict intra-module source filter (~140 candidates over 41 batches).
-- **~25 modules deep-audited in source** by the verification agent fleet.
+     (`_access: 'TRUE'` / anonymous `_permission`) and D7 `hook_menu` `access callback => TRUE`:
+     **2,385 public entry points** (393 of them un-audited D7 callbacks) → hand-audited the
+     highest-risk non-test ones.
+  2. **Standalone-script mining** — `.php` files inside module dirs that execute at file scope with
+     no Drupal bootstrap (directly web-servable, bypassing the access system). Highest-yield vein for
+     abandoned-module RCE/LFI/SSRF (coolfilter, banner, statichtml, admin_database, arcade, about,
+     audio_streaming_player, filerequest).
+  3. **CodeQL taint** — the improved `codeql-php` pack (augmented Drupal model + `method_exists`
+     guard + `query` arg-0 narrowing + new **LDAP-injection** query), batch-run over the corpus with
+     the strict intra-module source filter (~800 candidates over ~200 batches).
+- **~65 modules deep-audited in source** by the verification agent fleet; every confirmed finding
+  re-read in source, every cleared candidate ledgered with its reason (incl. module-classes to skip:
+  distro forks, API-response hydrators, properly-controlled callbacks).
 
 ## CONFIRMED pre-auth findings (21, source-verified)
 | # | Module | Sev | Class | State |
