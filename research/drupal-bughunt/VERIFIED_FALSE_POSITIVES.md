@@ -265,3 +265,18 @@ Micro-test confirmed `LdapInjection.ql` flags `ldap_search($c,$base,"(uid=$_GET[
 and clears the `ldap_escape(...)`-sanitized variant. The 0 findings across the cloned LDAP modules
 (`ldap`, `ldap_integration`, `ldap_addressbook`, `pubcookie`) are therefore genuine — those modules
 escape/parameterize their filters — not a broken query.
+
+## File-inclusion FPs — fixed-path bootstrap/autoloader includes (server env var + literal suffix)
+- **authcache (D7)** `authcache_p13n/frontcontroller/authcache.php:41-42` — standalone front controller,
+  but `require_once DRUPAL_ROOT.'/includes/bootstrap.inc'` / `AUTHCACHE_P13N_ROOT.'/includes/frontcontroller.inc'`;
+  DRUPAL_ROOT derives from `$_SERVER['SCRIPT_FILENAME']` via an **anchored** regex (`exit()` if it doesn't
+  end in the exact path). No request value / no `..` reaches the include. The `safe_frontcontroller` sibling
+  differs only in root-detection, not LFI. FP.
+- **advancedqueue_runner** `src/Scripts/jobs.php:17` — `require $_SERVER['PWD'].'/../vendor/autoload.php'`;
+  ReactPHP CLI daemon (`$loop->run()`), `PWD` is CLI-only shell env (absent under web SAPI). Not web-reachable. FP.
+- **apps (D7)** `apps.manifest.inc:599` — `require_once $app['file']` where `$app['file']` is always
+  `drupal_get_path('module','apps').'/apps.{installer,profile}.inc'`, behind `administer apps`. Fixed + admin. FP.
+- **afterburner (^10-^11)** `TaskBase.php:42` — `require $this->context['app_root'].'/autoload.php'` with
+  `app_root = DRUPAL_ROOT`; abstract Spatie async Task run in a forked child, not a route. FP.
+- **Root cause (→ codeql R&D):** `$_SERVER['SCRIPT_FILENAME']` / `['PWD']` / `['DOCUMENT_ROOT']` are
+  **server/environment-controlled**, not attacker-influenced, yet were treated as remote sources.
