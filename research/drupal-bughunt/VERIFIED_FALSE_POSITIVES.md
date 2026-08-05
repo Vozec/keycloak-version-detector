@@ -375,3 +375,28 @@ escape/parameterize their filters — not a broken query.
 - **about_tools/mailman.php** — executes at file scope (`switch($_GET['a'])`), web-servable, unguarded, **but
   every dangerous sink is commented out** — all `mysql_query()` (`:60,93-107`) and the `mail()` call are
   commented; output is a static md5 ticket + JSON. No live SQL/mail/exec/echo of request data. FP (dead sinks).
+
+## Bootstrap-then-anon wave (addonchat / booklists-ebooks / carto / voting / groups) — 1 confirmed (#29), rest cleared
+- **addonchat/addonchat_auth.php** — web-servable, `DRUPAL_BOOTSTRAP_LATE_PAGE_CACHE`, no auth; reads
+  `$_REQUEST['username'/'password'/'rasver']` but every `db_query` uses `%s`/`%d`+args (REPLACE/SELECT,
+  `:70-71,102-103,179,190,224`), no echo (Content-type text/plain, fixed keys), no unserialize/include/exec/
+  redirect/session-login. FP. **Low note:** `strcmp($user->pass,…)` (`:81`) is an unauth password/user-enum
+  oracle — not an in-scope sink.
+- **addonchat/addonchat_exit.php** — `DELETE … WHERE username='%s'` uses **session** `$user->name` (not
+  request); `header('location: '.$base_url.'/')` is server-derived site root (not request) → no open redirect;
+  `$_REQUEST['close']` only gates a static `window.close()`. FP.
+- **booklists/includes/booklists-ebooks.php** — `$_GET['catalog-url']`→`urldecode`→`l('…',$url)` printed; D6
+  `l()` routes href through `check_url()` (strip_dangerous_protocols + check_plain) → sanitized clickable
+  link, not injectable. FP.
+- **carto/widgets/CartoGPXFiles.php** — anon (full bootstrap, no access check) but SQL is
+  `… nid=%d and filename='%s'` (parameterized); the loaded path `$drupaldir.$filepath` comes from the **DB
+  row**, not the request; all 5 bundled `.xsl` verified to contain **no `php:function`** so
+  `registerPhpFunctions()` is a no-op (no XSLT RCE). FP. **Low note:** missing access check → anon can XSLT
+  any node's GPX attachment by nid+filename (bounded node-access bypass).
+- **voting/update-voting.php** — anon (full bootstrap, no access check) but the only variable `db_query`
+  (`UPDATE {votingapi_vote} …`) is parameterized with **DB-row** values, no request data at a sink. FP.
+  **Medium note:** left-in-place one-shot migration script → anon `POST start=1` triggers destructive vote
+  re-migration (data corruption/DoS) — not an injection sink.
+- **groups/generate-utids.php, generate-ntids.php** — include bootstrap.inc/common.inc but **never call
+  `drupal_bootstrap()`**, so `$user` is unpopulated → the `if($user->uid == 1)` guard (`:79`) fails closed;
+  anonymous never reaches the (parameterized) write sinks. FP (fail-closed access guard).

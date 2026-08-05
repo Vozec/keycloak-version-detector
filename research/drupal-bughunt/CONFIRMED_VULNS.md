@@ -381,3 +381,16 @@ legacy/abandoned cluster (CodeQL pipeline running).
   filtering blocks response-splitting → impact limited to open redirect. MED. (Same host-pinning gap that
   codeql-php improvement #8 now models as safe *only when* a constant scheme prefix is present — here the
   prefix is a bare `"Location: "`, so it is correctly a finding, not sanitized.)
+
+## 29. booklists (booklists.block.php) — LOW/MED — pre-auth block-visibility access bypass (ORIGINAL)
+- **Entry (pre-auth):** standalone `booklists/includes/booklists.block.php` runs at **file scope**, does
+  `chdir('../../../../../../'); drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL)` (`:2-5`) with **no access check**
+  → web-servable at `/sites/all/modules/booklists/includes/booklists.block.php`.
+- **Source→Sink:** `:9` `$block_to_enable = 'booklists_' . str_replace('-','_', $_GET['b2e'])` →
+  `:10` `block_load('booklists', $delta)` → `:11` `print drupal_render(_block_get_renderable_array(
+  _block_render_blocks([$block])))`.
+- **Impact:** renders any **booklists-module block by delta bypassing the normal block visibility / role /
+  page-context checks** — an anonymous user force-renders blocks an admin restricted to specific roles/pages.
+  No SQLi/RCE (module fixed to `booklists`, `$delta` is only a lookup key; unknown delta → empty block).
+  Bounded info disclosure. LOW/MED.
+- **Exploit:** `GET /sites/all/modules/booklists/includes/booklists.block.php?b2e=<delta>` (e.g. `nyt-block-1`).
