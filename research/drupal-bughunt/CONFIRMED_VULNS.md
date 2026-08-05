@@ -338,3 +338,13 @@ legacy/abandoned cluster (CodeQL pipeline running).
 - **Exploit:** submit `/user/register` with `Cookie: referral_data=<serialized POP-gadget object>` →
   object instantiated during registration. `db_query` are `%d`/`%s`-parameterized (no SQLi); the
   http_referer stored-XSS is admin-only + `check_plain`'d (no finding). HIGH.
+
+## 26. accuweather (Drupal 6, abandoned) — HIGH — pre-auth PHP object injection via cookie (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `accuweather` (`accuweather.module:34`,
+  `access arguments => array('access content')` = anonymous) → `accuweather_weather_page()` (`:206`).
+- **Sink:** `:210` calls `_accuweather_get_current_city($city)` which does
+  `unserialize($_COOKIE['accuweather_city'])` (`:178-179`, also `:186-187`) — **raw `unserialize` of a
+  fully client-controlled, unsigned cookie, no `['allowed_classes'=>false]`** (D6/PHP5).
+- **Exploit:** `GET /accuweather` with `Cookie: accuweather_city=<serialized POP-gadget object>` → object
+  instantiated during unserialize → object injection (RCE gadget-dependent). Same class as referral #25,
+  coolfilter #4, banner #5. HIGH.

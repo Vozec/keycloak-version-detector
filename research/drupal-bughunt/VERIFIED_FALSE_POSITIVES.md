@@ -301,3 +301,6 @@ escape/parameterize their filters — not a broken query.
 - **ajax_checklist (D6)** `ajaxchecklist/loadnid` — anonymous, but `db_query` uses `%d` placeholders
   (nid/uid integer-coerced); the `'user-%'` literal wildcards consume no placeholders; no `unserialize`;
   only non-sensitive checkbox state exposed. FP.
+
+- **scraper** — `unserialize($_POST['edit']['scraper_job_import_vals'])` (`:121`) is real request-fed
+  deserialization, but the hook_menu path is `admin/scraper` (admin-gated) → not pre-auth. Auth-required.
