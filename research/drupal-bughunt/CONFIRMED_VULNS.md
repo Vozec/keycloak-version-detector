@@ -439,3 +439,23 @@ legacy/abandoned cluster (CodeQL pipeline running).
   class as coolfilter #4 / referral #25 / accuweather #26. HIGH.
   (Side note: `admin/settings/block_quiz/view` & `/add` set `access callback => TRUE` alongside the
   permission, so the boolean TRUE wins → those admin *views* are anon-readable; writes stay gated. Low.)
+
+## 33. apex_ai (Drupal ^11.2, current) — CRITICAL — pre-auth SQL injection via VDB collection name (ORIGINAL, found by CodeQL)
+- **Entry (pre-auth):** route `/api/apex-ai/search` (`apex_ai.routing.yml:34-39`, `_controller
+  AiSearchController::query`, **`_permission: 'access content'`** = anonymous on a standard install).
+- **Source→Sink (3-file taint chain):**
+  1. `AiSearchController.php:58` `$collection = $payload['collection'] ?? 'default'` — raw JSON request body,
+     unsanitized → `:62` `$this->ragService->query($query, $collection, $topK, $model)`.
+  2. `ApexRagService::query` (`:188`) → `:199` `$vdbProvider->vectorSearch($collection, …)` (passes it as
+     `$collection_name`).
+  3. `ApexVdbProvider::vectorSearch` (`:211`) → `:221` `$table = 'vdb_' . $collection_name;` → **`:225`**
+     `$db->query("SELECT id, drupal_entity_id, … FROM \"{$table}\"")` — **request value string-interpolated
+     into a raw PDO/SQLite query** (double-quoted identifier), no placeholder/escape.
+- **Exploit:** `POST /api/apex-ai/search` `{"query":"x","collection":"a\" UNION SELECT sql,2,3,4,5,6 FROM sqlite_master--"}`
+  → breaks out of the `"vdb_…"` identifier, UNION-injects; scored rows are returned in the JSON `sources` →
+  direct read-out exfiltration from the vector DB. **CRITICAL** (pre-auth SQLi, current ^11.2).
+- **Precondition:** the sink is behind `if ($vdbProvider && !empty($queryEmbedding))` — an Apex embedding
+  provider must be configured (the module's core operating mode; not disqualifying). Sibling `apex_ai_vdb`
+  `querySearch` has the same `WHERE {$filters} LIMIT {$limit}` pattern (not on this anon route).
+- **Discovery:** surfaced by the improved codeql-php pack (taint), not grep — a multi-step JSON→service→
+  provider→identifier-concat flow across 3 files. Validates the CodeQL R&D front.

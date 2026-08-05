@@ -514,3 +514,31 @@ deep-audited. **All properly gated** (mirrors the "maintained modules' access pr
 - **aws_bedrock_chat** — `/aws-bedrock-chat/get-response`: model/agent/endpoint all from config, not request →
   SSRF FP. User `message` is `Html::escape`'d where echoed; only LLM output is embedded (model-driven, not
   reflected input). *(Low confirmed: unauth LLM proxy / credit burn.)* FP.
+
+## CodeQL discovery batch #1 (12 fresh modules) — high-sev triage: 1 confirmed (#33 apex_ai), 6 cleared
+Ran the improved codeql-php pack (security-extended + LdapInjection) over 12 unaudited modules with anon
+entries (annotations, i18n, billwerk_subscriptions, simple_sitemap, blockchain, akismet, symfony_mailer,
+import_html, devel, entity_browser, apex_ai, azure_ad) → 72 raw candidates; high-sev verified in source:
+- **annotations SSTI** (`ContextMcpController:189`, `ContextPreviewController:175/178/205`) — MCP route is
+  `_mcp_access` (bearer `mcp_api_key` or `view/administer annotations` perm, fails closed for anon); preview/
+  export routes need `view annotations context`+`administer annotations`. Sink is `ContextRenderer::render`, a
+  stateless markdown string-builder (implode/concat) — **no Twig / renderInline / createTemplate**. FP
+  (perm/bearer-gated + variables-not-template).
+- **apex_ai_prompts SSTI** (`PromptPreviewController:50/56`) — route needs `_permission:'administer apex ai'`.
+  FP (admin-gated).
+- **entity_browser SSTI** (`Modal.php:130`) — `render($content)` where `$content` is a **render array**
+  (`#type html_tag`), core render-array renderer not Twig; `$src` is an auto-escaped attribute value; also a
+  form AJAX callback, not an anon route. FP (variables-not-template).
+- **blockchain SSRF** (`BlockchainApiService:115/177`) — anon `/blockchain/api/*` are *responder* methods that
+  don't fetch a request URL; `:115` runs in admin `BlockchainSubscribeForm`/cron (config host); `:177`
+  `executeAnnounce` POSTs to **stored** peer endpoints on local block creation/cron (at most blind second-order
+  stored-SSRF, sink off any anon request path). FP.
+- **symfony_mailer code injection** (`CallbackEmailProcessor:117`) — `$this->callbacks[...]($email)` where
+  callbacks are `?callable` registered only programmatically by the mailer plugin/adjuster system; never
+  request-derived. FP (code-derived callable).
+- **import_html code/command injection** (`import_html_process.inc:569/2073/2080`,
+  `coders_php_library/tidy-functions.inc:177/183`, +path-traversal/XSS cluster) — **Drupal 7** admin tool;
+  every `hook_menu` callback requires `access import_html` (admin perm); sinks reachable only via the admin
+  import UI/batch/Drush. **No anonymous entry point** → the entire import_html candidate cluster is FP (admin-gated).
+- (Medium-sev leftovers — blockchain open-redirect `BlockchainController:72`, azure_ad logger XSS,
+  annotations export path-traversal — are in export/admin/logger paths, not anon request→sink; not pursued.)
