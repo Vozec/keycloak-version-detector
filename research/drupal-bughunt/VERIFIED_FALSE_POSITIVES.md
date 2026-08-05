@@ -604,3 +604,22 @@ High-sev cleared:
 
 CodeQL discovery running tally: batch #1 = 1 CRITICAL (#33 apex_ai); batches #2, #3, #4 = 0 confirmed. The
 large-modern-module cohort is clean; the taint pass earns its keep on the occasional multi-file flow (#33).
+
+## CodeQL discovery batch #5 (D7 cohort: asaf/banklink/admin_deck/og_vocab/account_sentinel/biblereadings/azure_acs/ajax_chain_select/blueshift/lightbox2/user_badges/avalara_cert) — 1 confirmed (#34 azure_acs XSS), rest cleared
+- **asaf** code-injection `asaf.pages.inc:19` — anon `asaf/pagecache/*` (`access callback=>TRUE`) does
+  `$callback = $form_state['triggering_element']['#ajax']['callback']; if(function_exists($callback)) return
+  $callback($form,$form_state);` — but `#ajax callback` comes from the **server-cached form definition**
+  (`form_get_cache($_POST['form_build_id'])`), not raw POST; it's a generic reimplementation of core's
+  `ajax_form_callback` with the same trust model (form_build_id is a server-issued token; callbacks are
+  form-author-defined). No attacker-injected callback string. FP (form-cache-defined, = core AJAX pattern).
+- **biblereadings** open-redirect `forms.inc:28` — `drupal_goto('admin/config/biblereadings/schedule/'.$year)`:
+  the destination is a **fixed internal path prefix** + a path segment; `drupal_goto` treats it as an internal
+  path (no external host), and it's an admin schedule-form submit handler. FP (fixed internal-path prefix).
+- **azure_acs** loose-compare `swt.php:71/147/154`, `wsfederation.php:73` — these are the SWT-HMAC / WS-Fed
+  field compares already assessed in the SSO audit: `==` on base64url HMAC / namespace strings (non-numeric →
+  exact compare), gated by the signing-key HMAC. Hardening nit (`hash_equals`), not exploitable. FP.
+- **admin_deck** code-injection `contrib/color_deck/plugins/decks/color/color.inc:113` — a copy of Drupal core's
+  `color.module` `color.inc` (theme color-scheme generation), admin theme-settings only. FP (core-derived, admin).
+- (banklink/account_sentinel/og_vocab/blueshift/lightbox2/user_badges/avalara_cert produced no high-sev anon
+  candidates.) **Pivot to the D7 cohort paid off** — batch #5 surfaced the #34 `drupal_set_message` XSS that the
+  large-modern-module batches (#2-4, all clean) would never have contained.

@@ -23,7 +23,7 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
   re-read in source, every cleared candidate ledgered with its reason (incl. module-classes to skip:
   distro forks, API-response hydrators, properly-controlled callbacks).
 
-## CONFIRMED pre-auth findings (33, source-verified)
+## CONFIRMED pre-auth findings (34, source-verified)
 | # | Module | Sev | Class | State |
 |---|--------|-----|-------|-------|
 | 4 | **coolfilter** | HIGH | PHP **object injection** — bundled PHPRPC `rpc.php`/`mbstring.php` raw `unserialize($_REQUEST)`, no bootstrap → RCE via POP chain (+ `coolplayer.php` reflected XSS) | D5/6, abandoned |
@@ -60,6 +60,7 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
 | 31 | **betting** | CRITICAL | pre-auth **SQL injection** — anon `betting/offer/<X>` (D6 fall-through) puts `arg(2)` raw into `pager_query` `AND t.tid = <INJECT>` | D6, abandoned |
 | 32 | **block_quiz** | HIGH | pre-auth **PHP object injection** — anon `block_quiz/answer_js` reaches `unserialize($_POST[block_quiz_content])`, no `allowed_classes` | D6, abandoned |
 | 33 | **apex_ai** | CRITICAL | pre-auth **SQL injection** — anon `/api/apex-ai/search` request `collection` → `vectorSearch` → `db->query("... FROM \"vdb_{$collection}\"")` raw concat (found by CodeQL taint) | **current** (^11.2) |
+| 34 | **azure_acs** | MED | pre-auth **reflected/session XSS** — anon `/acserror` puts `$_POST[ErrorDetails].errorMessage` into `drupal_set_message` (D7 renders HTML unescaped); forced-POST delivery, no CSRF (found by CodeQL) | D7 |
 
 Plus authenticated/secret-gated real bugs (addressbook SQLi behind `view addressbook`; bd_video request-`unserialize` behind a per-video secret) — recorded in `VERIFIED_FALSE_POSITIVES.md` as not-default-pre-auth.
 

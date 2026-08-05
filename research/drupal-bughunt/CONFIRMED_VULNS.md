@@ -459,3 +459,19 @@ legacy/abandoned cluster (CodeQL pipeline running).
   `querySearch` has the same `WHERE {$filters} LIMIT {$limit}` pattern (not on this anon route).
 - **Discovery:** surfaced by the improved codeql-php pack (taint), not grep — a multi-step JSON→service→
   provider→identifier-concat flow across 3 files. Validates the CodeQL R&D front.
+
+## 34. azure_acs (Drupal 7) — MED — pre-auth reflected/session XSS via drupal_set_message (ORIGINAL, found by CodeQL)
+- **Entry (pre-auth):** hook_menu `acserror` (`azure_acs.module:45-50`, `page callback => azure_acs_error`,
+  **`access callback => TRUE`** = anonymous, POST).
+- **Source→Sink:** `azure_acs_error()` (`azure_acs.pages.inc:131`): `$errors = json_decode($_POST['ErrorDetails'],
+  TRUE)` → `$user_error = array_pop($errors['errors'])` → **`drupal_set_message($user_error['errorMessage'],
+  'error')`** (`:139`). D7 `drupal_set_message()` stores the string in `$_SESSION['messages']` and
+  `theme_status_messages()` renders it as **raw HTML with no `check_plain`** (callers must pre-sanitize; this one
+  doesn't) → the attacker-controlled `errorMessage` is emitted unescaped.
+- **Exploit:** an auto-submitting cross-site form POSTs
+  `ErrorDetails={"errors":[{"errorMessage":"<script>…</script>"}]}` to the victim's `/acserror` (no CSRF token);
+  the message is stored in the victim's session, `drupal_goto('<front>')` redirects, and the script executes on
+  the front page in the victim's session context. **MED** (pre-auth reflected/session XSS; forced-POST delivery).
+- **Note:** distinct from the azure_acs SSO audit (which cleared the SWT-HMAC token flow / SSRF / open-redirect
+  as FP). CodeQL's ReflectedXss query surfaced this `drupal_set_message` sink the targeted audit missed —
+  another win for the codeql-discovery front.
