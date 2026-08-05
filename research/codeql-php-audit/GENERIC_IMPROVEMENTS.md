@@ -74,3 +74,24 @@ sanitizers were touched.
   without a numeric cast (sources include `Tools::getValue` and an
   `AdminController` accessor). Next step: trace whether a shared source is
   over-broad or a second-order/concat path needs a barrier — fix generically.
+
+## 3. `method_exists()` as a sanitizer guard — kills the dominant dynamic-dispatch FP class (`php-builtins.model.yml`)
+The code-injection query correctly treats the *callee identity* of a dynamic call (`$obj->$m()`,
+`$fn()`, `new $c()`) as the sink. But the pervasive **guarded-dispatch** idiom
+`if (method_exists($obj, $m)) { $obj->$m(...); }` bounds `$m` to the **declared methods of a concrete
+object** — not arbitrary code execution — yet was still reported as RCE. This was the single most
+common code-injection false positive across both hunts: TYPO3 `er24-rechtstexte`, `t3-cat-search`,
+`femanager`/`datamints_feuser` setter mass-assignment, and the Drupal dynamic-op dispatchers.
+
+Fix: add `method_exists` to `sanitizerGuardModel` (one data row). The existing `isGuardedRead`
+barrier then treats a tainted method name used in the positive branch of an `if (method_exists(...))`
+as sanitized. **Deliberately NOT `is_callable`/`function_exists`** — those are true for `system`/`exec`,
+so they do *not* bound the callee and must keep reporting.
+
+- Bench: **RECALL 183/232, FP-on-ok 40/176 — unchanged** (no true positive lost).
+- Controlled micro-test: `if (method_exists($this,$m)) $this->$m()` (guarded) → **no alert**; an
+  unguarded `$this->$m()` on the same tainted `$m` → **still alerted**. Exactly the intended split.
+- `in_array` / `array_key_exists` (constant-whitelist guards) were already modeled; `method_exists`
+  was the missing existence-guard behind the residual dynamic-dispatch noise.
+
+Patch: `patches/method-exists-guard.patch`.

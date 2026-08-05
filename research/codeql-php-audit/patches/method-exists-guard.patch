@@ -1,0 +1,18 @@
+diff --git a/php/ql/lib/ext/php-builtins.model.yml b/php/ql/lib/ext/php-builtins.model.yml
+index aac5f8bb00e..29b84bcf2cd 100644
+--- a/php/ql/lib/ext/php-builtins.model.yml
++++ b/php/ql/lib/ext/php-builtins.model.yml
+@@ -194,6 +194,13 @@ extensions:
+       - ["in_array"]
+       - ["array_key_exists"]
+       - ["preg_match"]
++      # `method_exists($obj, $name)` bounds a subsequent dynamic method call `$obj->$name()` to the
++      # DECLARED methods of a concrete object — i.e. not arbitrary code execution. This is the standard
++      # guarded-dispatch idiom (`if (method_exists($o,$m)) { $o->$m(...); }`); without it the
++      # code-injection query reports every such call as RCE (the dominant dynamic-dispatch FP class:
++      # er24-rechtstexte, t3-cat-search, femanager setters, …). NOT is_callable/function_exists — those
++      # are true for `system`/`exec`, so they do not bound the callee.
++      - ["method_exists"]
+ 
+   # ---- Taint steps: string built-ins that propagate any argument to the result ----------------
+   - addsTo:
