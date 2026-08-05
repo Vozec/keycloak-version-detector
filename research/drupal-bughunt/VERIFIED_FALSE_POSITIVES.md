@@ -552,3 +552,33 @@ ai_search_block Reflected XSS in a **SettingsForm** (admin); migrate_plus path-t
 set by the form builder (developer/admin), not request input, in a render Element (not an anon route);
 action_link type-juggling in `StateActionBase:340`. No anonymous request→dangerous-sink flow. (These modern
 modules are clean — consistent with the "maintained modules are solid" pattern.)
+
+## CodeQL discovery batch #3 (12 modules) — high-sev triage: 0 confirmed, all cleared
+Batch: g2, blizzardapi, basket_novaposhta, automatic_updates, amber, better_entity_reference,
+amazon_product_widget, amazon_store, address, ai_content_rag, ada_compliance, currency. Candidates cleared:
+- **amber** path-traversal/file-read (`AmberStorage.php:57/67` `file_get_contents`, anon `amber/cache`,
+  `amber/cacheframe/%/assets` `access callback=>TRUE`) — every path from `get_cache_item_path()` is gated by
+  `is_within_cache_directory()` (`:206` `strpos(realpath($path), realpath($file_root)) !== 0`) which collapses
+  `../` before the prefix check and defeats `php://filter`; plus `get_metadata()` re-md5s non-32-hex keys →
+  arbitrary ids yield empty metadata → NOT_FOUND. FP (realpath containment guard).
+- **blizzardapi_login** type-juggling (`pages.inc:177` `$hashed_pass == rehash(...)`, anon
+  `blizzardapi/verify/%/%/%`) — `rehash()` = `user_pass_rehash` = `drupal_hmac_base64` (base64url, non-numeric)
+  so `==` degrades to exact string compare; RHS server-generated (not forceable to `0e…`/all-digit), match
+  still needs the secret `$account->pass`. Mirrors D7 core reset-link compare. FP (hardening nit: use hash_equals).
+- **basket_novaposhta** — type-juggling `NovaposhtaHooks.php:92` `$tokenName=='NP'` is a template-render hook
+  (not route-reachable, not a security decision, non-numeric→exact); XSS `NovaPoshtaAPI.php:729` is a
+  `\Drupal::logger()->notice('<pre>'.print_r(...))` **dblog** sink (admin-viewed, escaped), and anon
+  autocomplete controllers return `JsonResponse` (never raw HTML). FP.
+- **ai_content_rag** (RAG, same family as apex_ai #33) — **SAFE**: `TreeRetriever` uses Drupal's parameterized
+  builder with **hardcoded table literals** (`'ai_content_rag_section'`); the user query is bound
+  (`MATCH…AGAINST(:q IN BOOLEAN MODE)`), vector rank computed in PHP, `vdb_collection` from the perm-gated
+  settings form. **No unparameterized concatenation — the exact discipline apex_ai #33 lacked** (which
+  interpolated the request `collection` into the table identifier). Instructive contrast, not a finding.
+- (amazon_product_widget unserialize has `allowed_classes=>FALSE` (safe); automatic_updates IDORs are in a CLI
+  `ConverterCommand`; migrate_plus/ai_search_block/action_link candidates admin/CLI/form-infra — all FP.)
+
+## CodeQL discovery method — running tally
+Batch #1 (annotations/i18n/billwerk/simple_sitemap/blockchain/akismet/symfony_mailer/import_html/devel/
+entity_browser/apex_ai/azure_ad): **1 CRITICAL (#33 apex_ai SQLi)** + 6 high-sev FP. Batch #2 (12 modern
+modules): 0. Batch #3 (12 modules): 0. The taint pass reaches multi-file flows grep can't (found #33 across
+3 files); modern/maintained modules are otherwise clean, consistent with the abandoned-vs-maintained pattern.
