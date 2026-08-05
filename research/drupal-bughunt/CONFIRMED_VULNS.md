@@ -364,3 +364,20 @@ legacy/abandoned cluster (CodeQL pipeline running).
   `GET /?q=track/ajax/detail/0 UNION SELECT name,pass,3,4,5,6 FROM users LIMIT 1&action=initsync`
   (6 columns match the 6 aggregate selects), or boolean `…/1 AND 1=1` vs `…/1 AND 1=2`. Full pre-auth DB
   read (password hashes). HIGH. Distinct module from #7 trackback (that one is SSRF).
+
+## 28. flickrhood (bundled phpFlickr lib) — MED — pre-auth open redirect in a directly-servable script (ORIGINAL)
+- **Entry (pre-auth):** the bundled auth callback `flickrhood/lib/phpFlickr/auth.php` runs at **file scope**
+  (no Drupal bootstrap, README says to link to it directly) → web-servable at
+  `/sites/all/modules/flickrhood/lib/phpFlickr/auth.php`.
+- **Source→Sink:** `:19-20` `$redirect = $_GET['extra']` → `:34` `header("Location: " . $redirect)` — raw,
+  no host allow-list.
+- **Reachability:** with `frob` empty the code takes `$f->auth(...)` which `exit`s at `phpFlickr.php:433`
+  (redirect not reached); supplying **`frob`** routes to `auth_getToken($_GET['frob'])`, which does **not**
+  exit (`die_on_error` defaults `false`, `:24/30/86`) even on an API error → execution falls through to the
+  attacker-controlled `header("Location: …")`. Works regardless of the (placeholder) API key.
+- **Exploit:** `GET /sites/all/modules/flickrhood/lib/phpFlickr/auth.php?frob=1&extra=https://evil.example`
+  → `302 Location: https://evil.example` (phishing / OAuth-callback abuse).
+- **Bounds:** needs `short_open_tag=On` (`<?`); one outbound Flickr request first; PHP `header()` CRLF
+  filtering blocks response-splitting → impact limited to open redirect. MED. (Same host-pinning gap that
+  codeql-php improvement #8 now models as safe *only when* a constant scheme prefix is present — here the
+  prefix is a bare `"Location: "`, so it is correctly a finding, not sanitized.)

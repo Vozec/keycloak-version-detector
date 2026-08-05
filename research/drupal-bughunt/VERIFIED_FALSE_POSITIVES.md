@@ -354,3 +354,24 @@ escape/parameterize their filters — not a broken query.
   export**, not IDOR; `$_REQUEST` only into `drupal_alter` (no implementer) / parameterized EFQ. NOTE:
   `appserver_voting_vote()` allows anon vote-stuffing via `$_REQUEST['client_id']` — a vote-integrity logic
   weakness, **out of the pre-auth disclosure/injection scope** (recorded for completeness, not a finding).
+
+## Standalone-script wave 2 (zina / lobby / bawstats / about_tools / flickrhood) — 1 confirmed (#28), 7 cleared
+- **zina/zina/index.php, common.php, batch.php, extras/tag_editor.php** — all **function-only libraries,
+  zero file-scope execution** (only `define()` + `class`). Request handling lives in `zina($conf)`, called
+  only from `zina.module:130` **after full bootstrap**, and every admin op gated by
+  `if(!$zc['is_admin']) return zina_access_denied()`. NOTE: these DO contain genuinely-dangerous shapes —
+  `preg_replace('/…/e', …)` (common.php:805, batch.php via `unserialize_utf8`) and `unserialize()`
+  (batch.php:122, sitekey-HMAC-token-gated) — so codeql-php's `preg_replace('/e')` sink (improvement) and
+  the object-injection query WILL flag them; source-verification clears them as bootstrap+admin+token gated.
+  A textbook "dangerous shape, correctly gated" FP. The only standalone sibling (`extras/filler.php`) has an
+  unconditional `exit;` at line 15.
+- **lobby/eactions.php** — function-only library (helpers), no file-scope statements, no superglobal reads,
+  depends on Drupal/CiviCRM symbols. Never entered directly. FP.
+- **bawstats/modules/render_jpgraph.inc.php** — DOES execute at file scope
+  (`if(isset($_GET['getgraph'])) baw_render_jpgraph_img();`) and the `PHP_SELF` sentinel is broken (tests a
+  typo'd filename), so web-servable — **but no request input reaches a live sink**: `include`s are
+  static/config paths (`../config.php`, `$BAW_CONF['jpgraph_path']`), `$_GET['type']` only picks literal
+  switch cases, `$_GET['d']/['f']` flow only into jpgraph plot objects. FP (config-derived includes).
+- **about_tools/mailman.php** — executes at file scope (`switch($_GET['a'])`), web-servable, unguarded, **but
+  every dangerous sink is commented out** — all `mysql_query()` (`:60,93-107`) and the `mail()` call are
+  commented; output is a static md5 ticket + JSON. No live SQL/mail/exec/echo of request data. FP (dead sinks).
