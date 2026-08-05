@@ -432,3 +432,25 @@ are already recorded.)
   block_view path not the anon handler. Open-redirect `previous_page` (`$_GET['q']`, `:16`) is only passed to
   a `drupal_alter` hook; default `$goto_path` is hardcoded `<front>`. FP (SSO HMAC-gated; hardening note:
   `==` not `hash_equals` on the HMAC — theoretical timing side-channel only).
+
+## Modern anonymous AI-endpoint wave (D10/11) — all 6 cleared (ecosystem data point: fail-closed guards)
+42 un-audited modules expose anonymous *write* routes; the 6 highest-risk AI-integration endpoints were
+deep-audited. **All properly gated** (mirrors the "maintained modules' access primitives are solid" pattern):
+- **ai_face_login** `/ai-face/verify` (`_access:'TRUE'`) — `user_login_finalize()` (`FaceLoginController:225`)
+  runs only if euclidean distance of the attacker's 128-float descriptor ≤ config threshold vs the victim's
+  **stored** descriptor (`FaceMatcher:21-29`, full 128-dim). The stored descriptor is the biometric secret;
+  threshold is config-only (not attacker-influenceable); generic 401 (no oracle); flood control 5/60s/IP. No
+  image upload / URL fetch → no SSRF/traversal. FP (biometric-secret distance gate). *(Design caveat, not a
+  code CVE: a victim photo could be turned into a matching descriptor client-side — inherent to face-login.)*
+- **ai_rag_api** `/api/ai-rag/v1/chat/completions` — `authenticator->authenticate()` (`:123`) BEFORE retrieval/
+  LLM; `ApiKeyAuthenticator:58` `hash_equals` bearer vs profile key, fails closed (unconfigured→throw); session
+  fallback needs `use ai rag api` perm (non-anon). `model` selects a config profile, no request URL → no SSRF. FP.
+- **ai_image** `/api/ai-image/getimage` (`_permission:'access content'`) — `provider` is a plugin-id (not a
+  URL), image freshly generated to `public://` (no id lookup) → no SSRF/traversal/IDOR. FP. **Low note:**
+  unauthenticated AI-image generation = anon can burn the site's AI-provider API credits (cost/DoS abuse).
+- **ai_slack** `/ai-slack/events` — `verify()` (`:71`) before any side effect: real HMAC-SHA256 over
+  `v0:{ts}:{body}` w/ per-bot signing secret, `hash_equals`, ±300s skew. `url_verification` only echoes. FP.
+- **ai_agents_ossa** `/api/agents/webhook/gitlab` — `X-Gitlab-Token` `hash_equals` vs config (`:66`), fails
+  closed on empty; action runs after; the GitLab fetch is a stub (no real outbound) → no SSRF. FP.
+- **akismet_antispam** `/akismet/v1/webhook` — body `key` `hash_equals` vs site Akismet key (`:83`), fails
+  closed (empty→401, unconfigured→503); side effects only after auth. FP (minor: case-insensitive compare).
