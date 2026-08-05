@@ -1,0 +1,26 @@
+diff --git a/php/ql/lib/ext/modern-frameworks.model.yml b/php/ql/lib/ext/modern-frameworks.model.yml
+index 7b286beed3b..2dde9612293 100644
+--- a/php/ql/lib/ext/modern-frameworks.model.yml
++++ b/php/ql/lib/ext/modern-frameworks.model.yml
+@@ -21,7 +21,7 @@ extensions:
+       - ["method", "createRequest", 1, "server-side request forgery"]
+       - ["method", "createUri", 0, "server-side request forgery"]
+       # SQL: raw query methods (PDO / mysqli / Doctrine). NB `prepare` is SAFE (parameterised).
+-      - ["method", "query", -1, "SQL injection"]
++      - ["method", "query", 0, "SQL injection"]
+       - ["method", "exec", -1, "SQL injection"]
+       - ["method", "unbuffered_query", -1, "SQL injection"]
+       - ["method", "real_query", -1, "SQL injection"]
+diff --git a/php/ql/lib/ext/wordpress.model.yml b/php/ql/lib/ext/wordpress.model.yml
+index c7ba00a76ce..cd8f87cf215 100644
+--- a/php/ql/lib/ext/wordpress.model.yml
++++ b/php/ql/lib/ext/wordpress.model.yml
+@@ -12,7 +12,7 @@ extensions:
+       - ["method", "get_var", -1, "SQL injection"]
+       - ["method", "get_col", -1, "SQL injection"]
+       - ["method", "get_row", -1, "SQL injection"]
+-      - ["method", "query", -1, "SQL injection"]
++      - ["method", "query", 0, "SQL injection"]
+       # HTTP fetch helpers — every WP remote wrapper is an SSRF sink on its URL argument.
+       - ["function", "wp_remote_get", 0, "server-side request forgery"]
+       - ["function", "wp_remote_post", 0, "server-side request forgery"]

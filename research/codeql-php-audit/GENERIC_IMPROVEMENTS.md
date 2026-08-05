@@ -95,3 +95,19 @@ so they do *not* bound the callee and must keep reporting.
   was the missing existence-guard behind the residual dynamic-dispatch noise.
 
 Patch: `patches/method-exists-guard.patch`.
+
+## 4. Narrow the bare `query` SQL sink from arg -1 (any) to arg 0 (`modern-frameworks`, `wordpress` models)
+Two bare-method rows `["method", "query", -1, "SQL injection"]` matched `->query()` on **any** object
+at **any** argument. That is over-broad: a raw-SQL `query()` (`mysqli::query`, `PDO::query`, `$wpdb->query`,
+unmodelled ORMs) always takes the SQL string as **arg 0**, but `-1` also flagged taint reaching arg 1+
+of *non-SQL* `query()` methods with the same name — Symfony `Ldap::query($dn, $filter, $options)`
+(the `ldap` module's 12 "SQLi" FPs), Solr/Elasticsearch query builders, HTTP-client `query()`, etc.
+
+Fix: `-1 → 0` on both rows. Raw SQL is preserved (arg 0); the false-positive arg-1+ matches on
+same-named non-SQL methods are dropped.
+- Bench: **RECALL 183/232 — unchanged**, `wordpress-plugins 42/42` unchanged (all `$wpdb->query($sql)`
+  are arg 0).
+- Micro-test: `$db->query($_GET['sql'])` (arg 0) → **alert**; `$ldap->query($dn, $_GET['filter'], $o)`
+  (taint at arg 1) → **no SQLi alert**. Exactly the intended split.
+
+Patch: `patches/query-arg0.patch`.
