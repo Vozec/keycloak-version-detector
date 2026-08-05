@@ -124,3 +124,19 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **pacs (pre-D6)** `pacs_xml.inc:129` — `fopen($_FILES['branch_file']['tmp_name'],"r")` guarded by
   `is_uploaded_file()`; `tmp_name` is PHP-assigned, not client-controlled. Also an `.inc` reached via
   `pacs/import/%` behind `user_access('manage tree')` — auth-required. FP.
+
+## Reflected-XSS FPs + one hardening-only (voting/wghtml/sso/tablemanager)
+- **voting (D4.x)** `update-voting.php:23` — reflects `$_SERVER['PHP_SELF']` (server var, not request);
+  and the script fatals in place (relative `include 'includes/bootstrap.inc'` fails), reachable only
+  if copied to docroot. FP.
+- **wghtml (D4.6)** `class_wghtml.php:246` — `echo $content` where `$content` is
+  `file_get_contents(DOCUMENT_ROOT.$fname)` (on-disk file bytes); the request only selects the file,
+  it doesn't reflect the request string. Local-file passthrough, not reflected XSS. FP.
+- **tablemanager (D6)** `tables.inc:378` — `print_r($clicked_button['#post'])` debug dump, but behind
+  `administer tables` + form token → admin self-XSS, not pre-auth. Auth-required.
+- **sso (D6)** `singlesignon.inc:169` — `return $hmac == $_GET['auth'];` (loose `==` on the SSO token).
+  **Hardening nit, not exploitable:** `$hmac = substr(hash_hmac('ripemd160',$msg,$key),0,24)` is a
+  secret-keyed 24-hex-char value the attacker can neither control nor predict; the `0e`-magic-hash
+  juggle would need the server hmac to be `^0e\d{22}$` (~16⁻²⁴), and PHP-8 `==` only juggles two
+  numeric strings. Should be `hash_equals`, but no practical auth bypass. (Debug `print_r($_COOKIE)`
+  at :243 goes to a log file behind `SSO_DEBUG=false`, not HTTP — not XSS.)
