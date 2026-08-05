@@ -198,3 +198,14 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   denied anonymously. SQL is `%d`-parameterized. Auth-required + FP.
 - **drupalvb/drupalvb.inc.php (D7)** — functions-only (no top-level statements → no file-scope sink);
   all queries use `:named` bound params; update uses a hardcoded column whitelist. FP.
+
+## Round-2 triage noise (documented so future rounds skip)
+- **Full-distro / core forks** (`1087726`, `aeg`) — these bundle Drupal core + contrib (ctools, features,
+  backup_migrate) inside a distribution/sandbox. Their code-inj/SSRF hits are core/contrib admin code, not
+  a standalone plugin's pre-auth surface. Excluded from triage.
+- **API-response hydrator factories** (`activecampaign_api` `Field.php:39`, `Tag.php:56`, …) —
+  `call_user_func([__NAMESPACE__.'\\Field\\'.ucfirst($json->type), 'createFromJsonResponse'], $json)`:
+  the class is `class_exists`-guarded under a **fixed namespace** and the method is a **constant literal**,
+  and `$json` is the upstream API's response (server-to-server), not the incoming request. Bounded factory
+  over a trusted source → not attacker-controlled code exec. (No clean generic codeql fix — de-modeling
+  API-client responses as non-sources would lose real second-order flows.) FP.
