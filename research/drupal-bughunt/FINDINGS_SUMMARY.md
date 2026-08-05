@@ -49,6 +49,8 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
 | 16 | **about** (imageFactory) | MED | pre-auth **SSRF + `php://` read** — standalone `imageFactory.php`, `$_GET[i]`→`getimagesize` (weak 1-byte regex) | D7 theme |
 | 19 | **avantlinker** | MED | pre-auth **reflected XSS** — `$search_term` (URL path) echoed raw; the `check_plain` result is unused | D7 |
 | 21 | **ajax_dlcount** | LOW | anonymous **DB mutation** — `file/%/dlcounter` writes for any fid, no CSRF (counter inflation / storage DoS) | D7 |
+| 24 | **blackbaud_netcommunity_sso** | HIGH | pre-auth **account takeover** — SSO sig covers `userid`+`ts` but not the email that selects the account → login as victim/admin | D7 |
+| 25 | **referral** | HIGH | pre-auth **PHP object injection** — `unserialize($_COOKIE['referral_data'])` at anonymous registration, no `allowed_classes` | D6, abandoned |
 
 Plus authenticated/secret-gated real bugs (addressbook SQLi behind `view addressbook`; bd_video request-`unserialize` behind a per-video secret) — recorded in `VERIFIED_FALSE_POSITIVES.md` as not-default-pre-auth.
 
