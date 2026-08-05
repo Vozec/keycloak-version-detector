@@ -149,3 +149,22 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   `TrustedRedirectResponse`, never from the request (query only appends UTM); ids `intval(...,36)` →
   entity `load()` (no SQLi); no SSRF. Missing `$entity->access('view')` = LOW (canonical-URL QR only). FP
   for open-redirect/SQLi.
+
+## Round-2 (expanded corpus) FPs — config-sourced / bounded-dispatch / DB-deserialize
+- **abbila (D6)** SSRF `abbila.lib.inc:39-71` — cURL host is `variable_get('abbila_host')` (config);
+  the anonymous `Abbila` path injects only the trailing **query string** against the *configured*
+  server (parameter injection into a fixed host, not SSRF). The one full-URL sink (`case 'check'`) is
+  admin-gated (`administer search`). FP.
+- **addresses (D6)** code-inj `addresses.inc:620` — `('addresses_province_list_'.$country_code)()`
+  behind `function_exists` AND the `$countries_all[$country]` ISO-country whitelist (`:604`); fixed
+  prefix + whitelist → no attacker-controlled callable identity. FP.
+- **a12s/page_context (^9-^11)** deserialize `Record.php:62` — `unserialize($value)` where `$value` is
+  a DB column hydrated via `fetchAll(PDO::FETCH_CLASS)`; server-side storage, not request. FP.
+- **active_form (^8.8-^9)** code-inj `BaseForm.php:187` — `$this->$method($request)` bounded by
+  `method_exists($this,$method)` (`checkMethod()`:236) + CSRF + HMAC storage token; dispatch limited to
+  the plugin's own methods. FP. (Note: the `method_exists` guard is in a *separate* validate method
+  from the dispatch, so the intra-`if` `method_exists` sanitizer-guard does not clear it — a
+  cross-function-guard case for a future codeql-php refinement.)
+- **acsf (Acquia Site Factory)** code-inj `AcsfMessage.php:159` (`$callback` is a constructor-injected
+  Closure, server-side) + SSRF `AcsfMessageRest.php:48/73` (URL from `AcsfConfig::getUrl()`, config).
+  No anonymous route reaches them (Drush/hooks). FP.
