@@ -623,3 +623,9 @@ large-modern-module cohort is clean; the taint pass earns its keep on the occasi
 - (banklink/account_sentinel/og_vocab/blueshift/lightbox2/user_badges/avalara_cert produced no high-sev anon
   candidates.) **Pivot to the D7 cohort paid off** — batch #5 surfaced the #34 `drupal_set_message` XSS that the
   large-modern-module batches (#2-4, all clean) would never have contained.
+
+## CodeQL discovery batch #6 (14 D7 modules) — clean (1 benign candidate)
+Batch: age_checker/abtest/autordf/beanfive/bing_autosuggest_api/betterbook/adminify/gotwo/ai_mobile/
+arcgis_webmap/accordions/bean_diff_revisions/amazon_wysiwyg/ajax_timeline. Only candidate: autordf
+loose-compare `autordf.inc:383` `substr($token,-1) == '.'` — a **trailing-full-stop text check** in tokenizer,
+not a secret/hash comparison. FP. No anon high-sev flow.
