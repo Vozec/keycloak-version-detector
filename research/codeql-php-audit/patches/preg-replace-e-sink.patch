@@ -1,0 +1,40 @@
+From dd591ce5aae86df07c200c9a144d670c9e30866a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 5 Aug 2026 10:14:29 +0000
+Subject: [PATCH] feature: preg_replace /e (PREG_REPLACE_EVAL) as a
+ code-injection sink - constant pattern with the e modifier makes arg1
+ (replacement) + arg2 (subject) execute as PHP code (classic PHP<7 RCE in
+ legacy modules); bench recall unchanged 183/232
+
+---
+ php/ql/lib/codeql/php/security/FlowSources.qll | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/php/ql/lib/codeql/php/security/FlowSources.qll b/php/ql/lib/codeql/php/security/FlowSources.qll
+index 90685d5f0db..36bc88fb91f 100644
+--- a/php/ql/lib/codeql/php/security/FlowSources.qll
++++ b/php/ql/lib/codeql/php/security/FlowSources.qll
+@@ -416,6 +416,20 @@ predicate isSinkOfKind(DataFlow::Node n, string kind) {
+     n.asExpr() = c.getArgument(cb) and
+     kind = "code injection"
+   )
++  or
++  // `preg_replace('/…/e', $replacement, $subject)` — the deprecated `e` (PREG_REPLACE_EVAL) modifier
++  // executes the REPLACEMENT (arg 1) as PHP code, first expanding backreferences from the SUBJECT
++  // (arg 2). A classic PHP<7 RCE (still shipped in the many legacy D5/6/7 modules in the wild). When
++  // the pattern (arg 0) is a constant string whose trailing modifier flags include `e`, both the
++  // replacement and the subject are code-injection sinks. Detected structurally on the constant
++  // pattern: after a PCRE delimiter, only valid modifier letters, one of them `e`.
++  exists(FunctionCall c |
++    c.getName() = "preg_replace" and
++    constantStringValue(c.getArgument(0))
++        .regexpMatch("(?s).*[/#~!@%|][imsxuADSUXJ]*e[imsxuADSUXJ]*") and
++    n.asExpr() = [c.getArgument(1), c.getArgument(2)] and
++    kind = "code injection"
++  )
+ }
+ 
+ /**
+-- 
+2.43.0
+

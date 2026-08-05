@@ -125,3 +125,18 @@ disclosure. `ldap_escape` (PHP 5.6+) is the sanitizer.
 - Model: `ext/ldap-injection.model.yml`; query: `src/Security/LdapInjection.ql`.
 
 Patch: `patches/ldap-injection-query.patch`.
+
+## 6. New sink: `preg_replace('/…/e', …)` code injection (PHP<7 PREG_REPLACE_EVAL RCE)
+`preg_replace` was modelled only as a taint *step*, not a *sink* — but the `e` modifier executes the
+**replacement** (arg 1) as PHP code, first expanding backreferences from the **subject** (arg 2). This
+is a classic RCE and is still shipped across the many legacy D5/6/7 modules in the corpus (autoweight,
+importpage, interview, coolfilter, drutex, flickrmodule, kasahorow, …). Added a structural sink: when
+the pattern (arg 0) is a constant string whose trailing PCRE modifier flags include `e`
+(`regexpMatch("(?s).*[/#~!@%|][imsxuADSUXJ]*e[imsxuADSUXJ]*")`), arg 1 and arg 2 become
+`"code injection"` sinks.
+- Bench: **RECALL 183/232 — unchanged** (additive; only fires on a rare constant-pattern shape).
+- Micro-test: `preg_replace('/(.*)/e', $_GET[x], $s)` and `preg_replace('#a#ie', $_GET[x], $s)` and
+  `preg_replace('/…/e', 'c', $_GET[s])` → **alert**; `preg_replace('/(.*)/', $_GET[x], $s)` (no `e`)
+  → **no alert**. Exactly the intended split.
+
+Patch: `patches/preg-replace-e-sink.patch`.
