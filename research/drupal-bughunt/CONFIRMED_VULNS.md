@@ -125,3 +125,15 @@ legacy/abandoned cluster (CodeQL pipeline running).
   → blind SSRF (response body not returned, only `<error>`), reaching internal services / cloud
   metadata. The other `drupal_http_request` calls in the file use node-body/editor URLs, not the
   anonymous ping body. MED (config-conditional).
+
+## 8. statichtml (pre-D6, abandoned) — LOW/MED — pre-auth path traversal → arbitrary file read (writable files) (ORIGINAL)
+- **Entry (pre-auth, bypasses Drupal):** `static.php` is a standalone script — `require('config.php')`
+  only sets `$staticHTML_storage_folder`, **no `drupal_bootstrap`**. Directly reachable:
+  `GET /sites/all/modules/statichtml/static.php?id=…`.
+- **Chain:** `static.php:18` `print staticHTML_getpage($staticHTML_storage_folder.'/staticHTML/'.$_GET['id'])`
+  → `:6` `fopen($file,"r+")` → read + printed. `$_GET['id']` is concatenated after a fixed prefix and
+  passed **unmodified** to `fopen` — **no `basename`/`realpath`/`..` rejection**. `?id=../../../<target>`
+  escapes the prefix.
+- **Primitive (honest caveat):** `"r+"` mode requires the target be webserver-**writable** (so not
+  `/etc/passwd`) — arbitrary read of webserver-writable files (uploads, logs, session files,
+  Drupal-writable source), echoed in the response. Pre-D6 era, abandoned. LOW/MED.

@@ -115,3 +115,12 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - Code-injection `:994` is `in_array`-whitelisted; `:4265/4291/4304` `call_user_func` over hard-coded
   form-def strings (not request). Unserialize `common.php:349/351` feeds on `$_SESSION`/file/DB ID3
   data, never `$_GET/$_POST/$_COOKIE`. No pre-auth object injection.
+
+## Standalone-script / traversal FPs (2)
+- **sparkline (D6)** `sparklib/samples/stock_chart*.php` — `@file($url)` where `$url` is a hard-coded
+  `http://ichart.finance.yahoo.com/...` literal; only `$_GET['s']` (regex `^[a-z\^]{1,5}$`) and
+  `$_GET['y']` (0-5) interpolate as query params. Remote-fetch to a fixed host, not a file-read/SSRF
+  primitive. Bundled demo — hygiene only. FP.
+- **pacs (pre-D6)** `pacs_xml.inc:129` — `fopen($_FILES['branch_file']['tmp_name'],"r")` guarded by
+  `is_uploaded_file()`; `tmp_name` is PHP-assigned, not client-controlled. Also an `.inc` reached via
+  `pacs/import/%` behind `user_access('manage tree')` — auth-required. FP.
