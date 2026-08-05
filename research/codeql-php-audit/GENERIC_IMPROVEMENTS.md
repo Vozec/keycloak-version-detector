@@ -180,3 +180,19 @@ a taint node is barriered when it is the **right operand of a `ConcatExpr` whose
   `https://semgrep.dev` case clears; the five true `Location: `+`REQUEST_URI` positives above it stay flagged.
 
 Edit: `php/ql/src/Security/OpenRedirect.ql` (`hostPinnedConcatOperand` barrier + `import codeql.php.AST`).
+
+## 9. `fwrite`/`fputs` are not path-traversal sinks (handle+data, no path arg) — socket-write FP
+`fwrite` was modelled as a path-traversal sink at arg `-1` (any argument), but `fwrite($handle, $data)`
+takes a **file/stream resource** (arg 0) and the **bytes to write** (arg 1) — *neither is a path*. The
+path/mode was already decided at the `fopen($path, …)` call, which is a separate, correctly-modelled
+path sink. Modelling `fwrite` too:
+- flagged **socket writes** as file writes — `fwrite(fsockopen($host,$port), $payload)` (email_verify,
+  and any raw-socket protocol client) reported as "path traversal";
+- flagged the **written data** (arg 1) as if it were a path, mislabelling content/echo flows.
+
+Fix: remove the `["function","fwrite",-1,"path traversal"]` line (php-builtins.model.yml). Recall-safe:
+- `fopen($userpath, 'w')` still catches the arbitrary-write path (the real sink of the write chain);
+- the semgrep-rules PHP corpus has **zero** `fwrite`/`fputs` positives, so nothing depended on it.
+- Bench: **RECALL 183/232, FP-on-ok 39/176 — both unchanged**; the win is on real code (socket clients).
+
+Edit: `php/ql/lib/ext/php-builtins.model.yml` (dropped the fwrite path-traversal sink, with a comment).

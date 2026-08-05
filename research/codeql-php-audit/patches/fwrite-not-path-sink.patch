@@ -1,0 +1,16 @@
+diff --git a/php/ql/lib/ext/php-builtins.model.yml b/php/ql/lib/ext/php-builtins.model.yml
+index 29b84bcf2cd..a8704c5e314 100644
+--- a/php/ql/lib/ext/php-builtins.model.yml
++++ b/php/ql/lib/ext/php-builtins.model.yml
+@@ -70,7 +70,10 @@ extensions:
+       - ["function", "readfile", -1, "path traversal"]
+       - ["function", "file", -1, "path traversal"]
+       - ["function", "unlink", -1, "path traversal"]
+-      - ["function", "fwrite", -1, "path traversal"]
++      # NB: fwrite($handle, $data) / fputs are NOT path sinks — arg 0 is a resource (file OR SOCKET) and
++      # arg 1 is the written data; the path decision already lives at the fopen() sink above. Modelling
++      # fwrite here flagged socket writes (fwrite(fsockopen(), $x) — email_verify) and echoed-data as
++      # "path traversal". No corpus positive relies on fwrite (fopen covers the real write-path chain).
+       # move_uploaded_file($tmp, $dest) — the canonical upload sink. The DESTINATION (arg 1) decides
+       # where (and under what name/extension) the upload lands; an attacker-controlled destination is
+       # arbitrary file write => webshell/RCE. arg 0 is the server-set temp path, so scope to arg 1.
