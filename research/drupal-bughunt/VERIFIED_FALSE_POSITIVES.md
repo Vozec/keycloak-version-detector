@@ -245,3 +245,23 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **adaptive_payments** `paypal_redirect/%/%` — lives in the `adaptive_payments_test` example submodule;
   `$cmd`/`$key` go only into the query string after the fixed `https://www.paypal.com/webscr?` (host fixed);
   no order/payment state mutation. FP.
+
+## Real bugs but NOT pre-auth (auth/secret-gated) — round-2 wave 4
+- **addressbook 6.x-4.2 (D6)** — GENUINE SQLi: `addressbook_{family,member,picture,map}.inc` concatenate
+  `$_POST[Search|Sort|fid|mid]` straight into `db_query($query)` (no `%d`/`%s` args) at ~13 sinks; but
+  every path is dispatched by the `addressbook/family`|`/member` callbacks gated by the `view addressbook`
+  permission (not anonymous by default). **Low-priv authenticated SQLi**, becomes pre-auth only if an
+  operator grants `view addressbook` to anonymous. (Recorded here as it's not default-pre-auth.)
+- **bd_video (D6)** — GENUINE request-fed `unserialize($_POST['params'])` on the anonymous
+  `system/bd_video/incoming` route, BUT gated by a prior `WHERE video_id=%d AND secret='%s'` check; the
+  32-char per-video `secret` (`md5(user_password())`) is shared only with the external transcoder and
+  needs `administer video` to create. Not reachable pre-auth (secret-gated).
+- **bitaps (^10-^12)** `Pages.php:83` — `@unserialize($payment->data)` where `data` is a DB column the
+  module serialized itself; `$_GET['oid']` only selects the row, and an HMAC `hash` check precedes it.
+  DB-sourced → not object injection. FP.
+
+## codeql R&D note: LDAP-injection query validated end-to-end
+Micro-test confirmed `LdapInjection.ql` flags `ldap_search($c,$base,"(uid=$_GET[user])")` (tainted filter)
+and clears the `ldap_escape(...)`-sanitized variant. The 0 findings across the cloned LDAP modules
+(`ldap`, `ldap_integration`, `ldap_addressbook`, `pubcookie`) are therefore genuine — those modules
+escape/parameterize their filters — not a broken query.
