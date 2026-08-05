@@ -209,3 +209,17 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   and `$json` is the upstream API's response (server-to-server), not the incoming request. Bounded factory
   over a trusted source → not attacker-controlled code exec. (No clean generic codeql fix — de-modeling
   API-client responses as non-sources would lose real second-order flows.) FP.
+
+## D7 anonymous hook_menu callbacks that ARE properly controlled
+- **alipay_api** `alipay/notify` — `$_POST` is trusted only inside `if ($verify_result)` where
+  `$verify_result = AlipayNotify::verifyNotify()` (RSA/MD5 sign + notify_id re-check via the Alipay SDK);
+  forged notifications hit `else → print 'fail'; exit()`. Order lookup bound `:order_id`. (Caveat: no
+  amount cross-check; strength depends on the out-of-tree SDK.) FP for payment bypass.
+- **bluga** `bluga/fetch` — `drupal_http_request()` always targets the hard-coded `BLUGA_API_END_POINT`;
+  the request supplies only a numeric `rid` (DB key) + whitelisted `size`. No attacker URL → no SSRF. FP.
+- **bassets_server** `bassetsfile/%` — the `%` arg is an HMAC `drupal_get_token` **cache token** (1h
+  expiry), not a path; the served `$file->uri` comes from cache→UUID→entity. `../` → cache miss → 404.
+  Not path traversal. FP. (Token-minting resource is `access content`-gated — separate Services concern.)
+- **amazons3_cors** `ajax/amazons3_cors` — returns a **scoped** S3 browser-upload policy (fixed bucket,
+  server-side key-prefix+ACL, +5min expiry); no AWS secret in the JSON, and `ajax_get_form()` requires a
+  valid `form_build_id` from a rendered widget. Not an open signing oracle. FP.

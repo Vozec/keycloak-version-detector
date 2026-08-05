@@ -236,3 +236,17 @@ legacy/abandoned cluster (CodeQL pipeline running).
 - **Exploit:** `GET …/imageFactory.php?i=http://169.254.169.254/latest/meta-data/&w=100` → server-side
   fetch = SSRF (cloud metadata / internal hosts); `?i=php://filter/convert.base64-encode/resource=…` →
   local file read as "image". MED.
+
+## 17. azure_blob (Drupal 7) — MEDIUM/HIGH — pre-auth arbitrary private-blob read / file-access bypass (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `azure/remote` is **`'access callback' => TRUE`** (`azure_blob.module:84`)
+  → `azure_blob_remote_files($scheme)`. Its sibling `azure_blob_image_style_deliver` enforces
+  `IMAGE_DERIVATIVE_TOKEN` (`:123-124`), but `remote_files` has **no token / grant check** — only
+  `file_stream_wrapper_valid_scheme($scheme)` (validates the scheme *name*, not access).
+- **Sink:** `$scheme = arg(1)`, `$target = implode('/', array_slice(func_get_args(),1))` (the rest of the
+  request path) → `file_stream_wrapper_get_instance_by_uri("$scheme://$target")->downloadContent()`
+  (`azure_blob.streamwrappers.inc:222`) → `getBlob(container, getFileName())` (blob name = request path
+  verbatim, `getTarget()` only trims slashes — **no confinement, no grant check**) → `fpassthru`.
+- **Exploit:** the container is **private by default**, so
+  `GET /azure/remote/<azure_scheme>/path/to/private/secret.pdf` streams any blob in the container to an
+  anonymous caller, bypassing Drupal's private-file access system. MED/HIGH. Fix: enforce a per-file
+  access/token check like the image-style sibling.
