@@ -177,3 +177,13 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **admintheme** DataTables `ssp.php` — directly reachable but `require('../../../../examples/…/ssp.class.php')`
   targets a file absent from the package (the whole `examples/` tree is missing) → fatal before `$_GET`
   reaches any SQL; `$sql_details` creds empty. Dead code. FP.
+
+## Standalone-script FPs (round-2 batch 3)
+- **biz (D7 theme)** `images/img.php` — GD text→PNG renderer; `msg` drawn only, `size` numeric,
+  `font` whitelisted against a `readdir()` of the local `fonts/`, sole `include` is a fixed filename.
+  No URL fetch, no request-controlled path. FP.
+- **citizenspeak (D5/6)** `citizenspeak.reports.php` — function definitions only, **zero file-scope
+  execution** (direct access does nothing; would fatal on undefined `db_query`). Queries `%d`-parameterized. FP.
+- **booklists (D7)** `includes/booklists-ebooks.php` — prints a static HTML lightbox, serves **no
+  files**; `catalog-url` flows only into Drupal `l()` (sanitized href), no download/`readfile` sink.
+  Also `chdir('../../../../../../')` is one level too high → fatals in a standard install. FP.

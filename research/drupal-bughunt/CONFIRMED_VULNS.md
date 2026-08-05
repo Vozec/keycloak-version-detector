@@ -203,3 +203,24 @@ legacy/abandoned cluster (CodeQL pipeline running).
   host/port/scheme with **no validation** (`http://169.254.169.254/latest/meta-data/`, `file:///etc/passwd`,
   internal hosts). Reflection is limited to the ICY `StreamTitle` (≤39 chars), so it's blind/semi-blind
   SSRF (+ marginal XSS only via an attacker-controlled ICY server). MED.
+
+## 14. admin_database (CURRENT, Drupal ^9||^10) — HIGH — pre-auth local file inclusion → RCE via cookie-controlled include (ORIGINAL)
+- **Entry (pre-auth, bypasses Drupal):** `admin_database/assets/adminer_with_plugins.php` is a
+  standalone loader with **no authentication of any kind**. Directly reachable:
+  `GET /modules/admin_database/assets/adminer_with_plugins.php`.
+- **Sink:** `$adminerFile = $_COOKIE["admin_database_adminer_file"]` (`:7`) → `include $adminerFile;`
+  (`:42`). The value is included **with no path validation / basename / realpath / allow-list**; the
+  only gate is that the cookie be non-empty (client-supplied).
+- **Exploit:** `GET …/adminer_with_plugins.php` with `Cookie: admin_database_adminer_file=/etc/passwd`
+  → arbitrary local file inclusion; with PHP wrappers
+  (`php://filter/convert.base64-encode/resource=…` for source disclosure, or `data://`/log-poisoning/
+  a plantable upload) → **RCE**. Current maintained (^9||^10) → high impact. HIGH.
+
+## 15. arcade (Drupal 6, abandoned) — MEDIUM/HIGH — pre-auth local file inclusion (ORIGINAL)
+- **Entry (pre-auth):** `arcade/gameserver.php` self-bootstraps Drupal (`:30`) with **no access
+  check** (`arcade_check_secure()` is defined `:10` but never called at file scope). Directly reachable.
+- **Sink:** `include_once("protocols/{$_POST['game_protocol']}.inc")` (`:42`) — the POST value is
+  concatenated into the include path with **no whitelist/basename/realpath**. `.inc` is appended.
+- **Exploit:** `POST game_protocol=../../../../sites/default/files/<plantable>` → includes an
+  attacker-plantable `.inc` (e.g. via any file-upload sink) → RCE; also arbitrary `.inc` disclosure /
+  traversal. Score-submission SQL there is `%d`-parameterized (clean). MED/HIGH (`.inc`-restricted).
