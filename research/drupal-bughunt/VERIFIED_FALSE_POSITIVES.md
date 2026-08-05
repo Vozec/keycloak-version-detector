@@ -629,3 +629,22 @@ Batch: age_checker/abtest/autordf/beanfive/bing_autosuggest_api/betterbook/admin
 arcgis_webmap/accordions/bean_diff_revisions/amazon_wysiwyg/ajax_timeline. Only candidate: autordf
 loose-compare `autordf.inc:383` `substr($token,-1) == '.'` — a **trailing-full-stop text check** in tokenizer,
 not a secret/hash comparison. FP. No anon high-sev flow.
+
+## CodeQL discovery batch #7 (12 D7 modules) — clean
+Batch: 1862848/biblio_autocomplete/block_class_tags/badbot/account_reminder/boost_captcha/access_code/aimtell/
+autocomplete_google_places/admin_views/anki/beta_signifier. Only candidates: anki SSRF
+`AnkiServerCollection.php:51/91/140` — `request($path)` uses **fixed literal paths** ('add_note'/'list_decks'/
+'find_cards'…); the HTTP host is in `AnkiServerConnection` from an admin `variable_get` (config-sourced Anki
+server URL), methods run in authenticated review flows. FP (config-sourced-URL API client — documented skip
+class). D7 cohort now exhausted: batch #5 → #34 azure_acs XSS; #6, #7 clean.
+
+## CodeQL discovery-batch track — final tally (7 batches, ~84 modules)
+Isolated-DB CodeQL runs of the improved php pack (security-extended + LdapInjection) over fresh unaudited
+anon-entry modules, high-sev triaged + source-verified:
+- Batch #1 (large modern): **#33 apex_ai CRITICAL SQLi** (3-file taint flow grep can't reach) + 6 FP.
+- Batches #2, #3, #4 (large modern): 0 — well-maintained cohort is clean.
+- Batch #5 (D7 cohort pivot): **#34 azure_acs MED reflected/session XSS** (drupal_set_message) + FPs.
+- Batches #6, #7 (D7 cohort): 0. Cohort exhausted.
+Net: 2 confirmed (1 critical, 1 med) that the grep veins + targeted agent audits had missed — the taint pass
+earns its place on multi-file and framework-mediated flows. Modern/maintained modules otherwise clean,
+reinforcing the abandoned-vs-maintained pattern that has held across TYPO3 + Drupal.
