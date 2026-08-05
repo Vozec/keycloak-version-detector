@@ -280,3 +280,8 @@ escape/parameterize their filters — not a broken query.
   `app_root = DRUPAL_ROOT`; abstract Spatie async Task run in a forked child, not a route. FP.
 - **Root cause (→ codeql R&D):** `$_SERVER['SCRIPT_FILENAME']` / `['PWD']` / `['DOCUMENT_ROOT']` are
   **server/environment-controlled**, not attacker-influenced, yet were treated as remote sources.
+
+- **addresses (D6)** `addresses.inc:615` File-inclusion — `include_once …/countries/$country_code.'.inc'`
+  where `$country_code` iterates `$countries` = keys of `$countries_all` (the ISO-country list); `$country`
+  is validated `$countries_all[$country]` before use → bounded to real `/countries/<iso>.inc` files. Same
+  whitelist that makes its `:620` code-injection sibling a FP. FP.
