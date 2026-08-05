@@ -285,3 +285,15 @@ escape/parameterize their filters — not a broken query.
   where `$country_code` iterates `$countries` = keys of `$countries_all` (the ISO-country list); `$country`
   is validated `$countries_all[$country]` before use → bounded to real `/countries/<iso>.inc` files. Same
   whitelist that makes its `:620` code-injection sibling a FP. FP.
+
+## D7 anonymous callbacks properly controlled (wave 5)
+- **allplayers** `allplayers/auth` — acts only on the caller's own `$_SESSION` OAuth tokens; post-auth
+  destination is the admin `allplayers_redirect` variable (not request) → no open redirect. Residual:
+  email auto-link/auto-login only if the IdP allows unverified emails (+ no CSRF state). Not a clean
+  pre-auth bug. FP.
+- **beanstalk** `beanstalk/webhook` — requires a per-repo secret `?t=` token validated against
+  `{beanstalk_repository}` (hard `drupal_access_denied()` otherwise); token is `drupal_get_token`/
+  `md5(...private_key)` (unguessable). Even with it, the only sink is node creation; SQL escaped. FP.
+- **ark** `ark:/%/%` — `$naan` must equal the site's configured NAAN; redirect target is `entity_uri()`
+  of a server-side-matched local entity (not attacker URL); lookups use `:named` placeholders. No open
+  redirect, no SQLi. FP.

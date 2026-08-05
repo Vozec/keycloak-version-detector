@@ -288,3 +288,28 @@ legacy/abandoned cluster (CodeQL pipeline running).
   file_dlcount` (`:53`). `GET /file/<n>/dlcounter` inflates the public download counter and seeds
   unbounded junk rows (storage DoS). Per-IP dedup is bypassable via rotating IPs and resets after the
   24h retention cron. **SQLi is a FP** — all queries use named placeholders (`:fid`,`:ip`). LOW.
+
+## 22. azure (azure_storage, Drupal 7) — MEDIUM/HIGH — pre-auth private-file (image derivative) read (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `azure/generate/%image_style` (`azure_storage.module:39-43`,
+  **`access callback => TRUE`**) → `azure_storage_image_style_deliver($style, $scheme)` (`:49`).
+- **Cause:** it's a copy of core's `image_style_deliver` that **dropped the `itok` token check, the
+  `drupal_access_denied()` denial, and the `hook_file_download` access hooks** (grep: no `itok` /
+  `file_download` / `drupal_access_denied` anywhere in the module). `$target = implode('/', $args)`
+  (`:58`) is the unsanitized trailing URL path → `"$scheme://$target"` → `copy()` → the derivative is
+  generated and served.
+- **Exploit:** `GET /?q=azure/generate/thumbnail/private/confidential/secret.jpg` → 302 to a generated
+  derivative of the **private** image — anonymous read of `private://` (and any wrapper-reachable)
+  image files, bypassing Drupal's private-file access + the anti-enumeration `itok`. MED/HIGH. (Same
+  class as azure_blob #17 and adaptive_image #18 — a delivery callback missing the access re-check.)
+
+## 23. aegir_ansible (aegir_ansible_inventory, Drupal 7 / Aegir-DevShop) — MEDIUM — pre-auth infrastructure info disclosure (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `inventory` (`aegir_ansible_inventory.module:12-14`,
+  **`access callback => TRUE`**) → an Ansible dynamic-inventory JSON endpoint. The source header
+  literally says `@TODO: Access control!` (`inventory-endpoint.php:6`).
+- **Cause / leak:** `GET /inventory` returns, unauthenticated, JSON of **every managed server's**
+  hostname, **IP addresses** (`db_query("SELECT ip_address FROM {hosting_ip_addresses} …")`, `:36`),
+  all Ansible variables, and `aegir_user_authorized_keys = variable_get('devshop_public_key')` (`:55`).
+- **Impact:** full internal topology + IP map + infra config of an Aegir/DevShop hosting fleet
+  (+ the DevShop public key) to any anonymous caller — high-value recon for attacking the hosting
+  infrastructure. MED. (The sibling `keys/%` route targets `devshop_servers_user_keys`, defined in the
+  external `devshop_servers` module — not vendored here, so unconfirmable from this source.)
