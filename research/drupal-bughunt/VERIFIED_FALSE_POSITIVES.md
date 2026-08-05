@@ -304,3 +304,13 @@ escape/parameterize their filters — not a broken query.
 
 - **scraper** — `unserialize($_POST['edit']['scraper_job_import_vals'])` (`:121`) is real request-fed
   deserialization, but the hook_menu path is `admin/scraper` (admin-gated) → not pre-auth. Auth-required.
+
+## Object-injection FPs — request value is a DB lookup KEY, not the deserialized bytes
+(Recurring shape: `unserialize($row->col)` where the request only picks *which* row via a WHERE clause.)
+- **apdqc (D7)** — all `unserialize()` sinks read server-side storage: `$user->data` (`session.inc:207`,
+  auth-gated `uid>0 && status==1`, core's `_drupal_session_read` pattern), cache-bin rows, `{menu_router}`
+  `page_arguments`, `{variable}` (install/CLI). The `$_COOKIE` SID is only escaped into `WHERE s.sid='…'`;
+  it never supplies serialized bytes. FP.
+- **kasahorow/kdictionary (D6)** — the 9 `unserialize()` sinks all take `{kdictionary}` column values
+  (`children`/`langindex`/`editor`/`alphabets`); `$_GET['id']`→`WHERE did='%s'`, `arg(1)`→`WHERE iso='%s'`
+  are lookup keys only. Callbacks are `use dictionary`/`administer dictionary` permission-gated. FP.
