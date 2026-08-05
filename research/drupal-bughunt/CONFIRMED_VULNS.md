@@ -137,3 +137,43 @@ legacy/abandoned cluster (CodeQL pipeline running).
 - **Primitive (honest caveat):** `"r+"` mode requires the target be webserver-**writable** (so not
   `/etc/passwd`) — arbitrary read of webserver-writable files (uploads, logs, session files,
   Drupal-writable source), echoed in the response. Pre-D6 era, abandoned. LOW/MED.
+
+## 9. amocrm_widget (Drupal 7) — CRITICAL/HIGH — anonymous arbitrary function invocation + auth bypass (ORIGINAL)
+- **9a — Arbitrary function invocation (CRITICAL, CWE-749):** `amocrm_widget/form-submit`
+  (`amocrm_widget.module:32-35`, **`'access callback' => TRUE`** = anonymous) →
+  `amocrm_widget_form_submit()` (`:270-280`): `$form_data = $_POST;` then
+  `if (!empty($form_data['callback']) && function_exists($form_data['callback'])) { $data = $form_data['callback']($form_data); }`
+  — the attacker names **any defined PHP function**, called with the `$_POST` array as its argument.
+  `function_exists` does **not** bound the callee to safe functions (it is true for `system`,
+  `phpinfo`, Drupal internals, file/DB helpers). `POST /amocrm_widget/form-submit` with
+  `callback=phpinfo` → full `phpinfo()` disclosure; other single-array-arg functions give
+  file/DB/redirect primitives. Anonymous, no token/CSRF.
+- **9b — Auth bypass / session takeover (HIGH):** `amocrm_widget/widget-init?api_key=…`
+  (`:11-14`, `access callback TRUE`) → `_amocrm_widget_user_login_by_key()` (`:250-264`):
+  `amocrm_widget_get_user_by_api_key($api_key)` (plain `array_search`/`==`), then for anonymous
+  (`$user->uid==0`) any matched account triggers `$user = $account; user_login_finalize();` — logs
+  the caller in **as that user**. The api_key travels in the GET URL (leaks via logs/referer/history)
+  and there is no flood/rate-limit or constant-time compare. Session takeover on key knowledge/leak.
+
+## 10. api_normalization 1.x (CURRENT, Drupal ^10||^11) — MEDIUM/HIGH — anonymous entity IDOR / info disclosure (ORIGINAL)
+- **Entry (pre-auth):** route `api_normalization.schema_org.transform_entity`
+  (`api_normalization.routing.yml:1036`): `/api_normalization/schema-org/transform/{entity_type}/{entity_id}`,
+  `_permission: 'access content'` (held by anonymous by default), GET, `_format: json`.
+- **Cause:** `SchemaOrgController::transformEntity()` does
+  `$entity = $this->entityTypeManager->getStorage($entity_type)->load($entity_id)` and returns the
+  entity's field values as JSON-LD **with no `$entity->access('view')` / publish check**. (The class
+  ships an `access()` method requiring an admin perm, but it is **not wired to the route** — dead code.)
+- **Exploit:** `GET /api_normalization/schema-org/transform/node/<id>` returns **unpublished** node
+  fields; `…/transform/user/<uid>` returns user-entity fields (email, etc.) — anonymous enumeration by
+  incrementing id. Current maintained module → higher impact. Fix: enforce `$entity->access('view')`.
+- The submodule webhook `/api/webhook/{webhook_id}` is properly HMAC-SHA256 + `hash_equals` fail-closed (FP).
+
+## 11. better_register 8.x (Drupal 8) — MEDIUM — forgeable email-verification token (ORIGINAL)
+- **Entry (pre-auth):** `/user/register/verify-email/{account}/{hash}` (`_access: 'TRUE'`) →
+  `ConfirmationEmailController` — grants the `email_confirmed` role when
+  `$hash == static::getUserHash($account)` (`:67`).
+- **Cause:** `getUserHash()` (`:88`) returns `md5($account->getEmail() . $account->getPreferredLangcode())`
+  — **no site secret/salt**, and compared with loose `==` (not `hash_equals`). Since the module sets
+  username = email, emails are public → an attacker computes `md5(<email>.'en')` and **confirms/verifies
+  any account** without inbox access (email-verification bypass). Fix: HMAC with the site hash-salt +
+  `hash_equals`. (Register-form role mass-assignment was checked — no roles field exposed, FP.)

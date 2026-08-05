@@ -140,3 +140,12 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   juggle would need the server hmac to be `^0e\d{22}$` (~16⁻²⁴), and PHP-8 `==` only juggles two
   numeric strings. Should be `hash_equals`, but no practical auth bypass. (Debug `print_r($_COOKIE)`
   at :243 goes to a log file behind `SSO_DEBUG=false`, not HTTP — not XSS.)
+
+## Anonymous-facing modules that are properly gated (expanded corpus)
+- **anonymous_subscriptions (^8.7-^9)** — confirm/unsubscribe tokens are per-record
+  `Crypt::randomBytesBase64(20)` (160-bit CSPRNG); wrong code → redirect to front, no action. All SQL
+  via parameterized `entityQuery`. Residual is only flood-limited email-spam via `/subscribe`. FP.
+- **autoshortqr (^10-^11)** — the redirect target comes from the stored `redirect` entity via
+  `TrustedRedirectResponse`, never from the request (query only appends UTM); ids `intval(...,36)` →
+  entity `load()` (no SQLi); no SSRF. Missing `$entity->access('view')` = LOW (canonical-URL QR only). FP
+  for open-redirect/SQLi.
