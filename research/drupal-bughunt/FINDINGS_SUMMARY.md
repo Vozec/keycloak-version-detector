@@ -37,6 +37,20 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
 | 10 | **api_normalization** | MED/HIGH | anonymous **entity IDOR** — `transformEntity` loads any entity by id, no `->access()` check → unpublished/user fields as JSON-LD | **current** (^10-^11) |
 | 11 | **better_register** | MED | **forgeable email-verify token** — `md5(email.langcode)`, no secret, `==` compare → verify any account | D8 |
 | 8 | **statichtml** | LOW/MED | pre-auth **path traversal** — standalone `static.php`, `$_GET[id]`→`fopen`, no bootstrap (writable-file read) | pre-D6, abandoned |
+| 14 | **admin_database** | HIGH | pre-auth **LFI→RCE** — `include $_COOKIE['…adminer_file']`, no auth (PHP-wrapper/log-poison RCE) | **current** (^9-^10) |
+| 15 | **arcade** | MED/HIGH | pre-auth **LFI** — standalone `gameserver.php`, `include "protocols/{$_POST[game_protocol]}.inc"` | D6, abandoned |
+| 12 | **filerequest** | MED | pre-auth **file-access bypass** — `throttle.php` streams `files/` blobs, no grant check (bypassable empty-Referer) | abandoned |
+| 17 | **azure_blob** | MED/HIGH | pre-auth **private-blob read** — `azure/remote` `access=>TRUE`, no token (sibling has one) | D7 |
+| 22 | **azure** (azure_storage) | MED/HIGH | pre-auth **private-file read** — `azure/generate` delivery dropped the `itok`/access checks | D7 |
+| 18 | **adaptive_image** | MED/HIGH | pre-auth **private-derivative read** — `file_download()` return discarded → falls through to `file_transfer()` | D7 |
+| 20 | **api_source** | MED | pre-auth **source-code disclosure** — `api/source/%/%` `access=>TRUE`, bypasses `access API reference` | D7 |
+| 23 | **aegir_ansible** | MED | pre-auth **infra info disclosure** — `/inventory` anon JSON of server IPs/vars/authorized-keys (`@TODO: Access control!`) | D7/DevShop |
+| 13 | **audio_streaming_player** | MED | pre-auth **SSRF** — standalone `as_getnowplaying.php`, `$_POST[url]`→`fopen`, no bootstrap | abandoned |
+| 16 | **about** (imageFactory) | MED | pre-auth **SSRF + `php://` read** — standalone `imageFactory.php`, `$_GET[i]`→`getimagesize` (weak 1-byte regex) | D7 theme |
+| 19 | **avantlinker** | MED | pre-auth **reflected XSS** — `$search_term` (URL path) echoed raw; the `check_plain` result is unused | D7 |
+| 21 | **ajax_dlcount** | LOW | anonymous **DB mutation** — `file/%/dlcounter` writes for any fid, no CSRF (counter inflation / storage DoS) | D7 |
+
+Plus authenticated/secret-gated real bugs (addressbook SQLi behind `view addressbook`; bd_video request-`unserialize` behind a per-video secret) — recorded in `VERIFIED_FALSE_POSITIVES.md` as not-default-pre-auth.
 
 ## The pattern (same as TYPO3)
 - **Maintained modules' access primitives are solid** — the public-route audit cleared plupload
