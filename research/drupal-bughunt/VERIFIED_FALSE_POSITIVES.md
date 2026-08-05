@@ -400,3 +400,14 @@ escape/parameterize their filters — not a broken query.
 - **groups/generate-utids.php, generate-ntids.php** — include bootstrap.inc/common.inc but **never call
   `drupal_bootstrap()`**, so `$user` is unpopulated → the `if($user->uid == 1)` guard (`:79`) fails closed;
   anonymous never reaches the (parameterized) write sinks. FP (fail-closed access guard).
+
+## scraper — request-`unserialize` object injection, but AUTH-gated (not pre-auth)
+`scraper_job_import_submit()` (`scraper.module:121`) does raw `unserialize($_POST["edit"]
+["scraper_job_import_vals"])` with no `allowed_classes` — a genuine object-injection primitive — BUT it is
+the submit handler of the `admin/scraper/import` form, whose hook_menu item has
+`'access' => user_access('administer scraper')` (`:28-31`). Drupal checks menu access for the current path
+before processing the form, so an anonymous user is denied before the submit handler runs. Real
+**authenticated (`administer scraper`) POI**, not default-pre-auth — recorded here like addressbook SQLi /
+bd_video secret-gated unserialize. (This is the only raw request-`unserialize` remaining in the corpus after
+the standalone-script veins; all pre-auth ones — coolfilter #4, banner #5, referral #25, accuweather #26 —
+are already recorded.)
