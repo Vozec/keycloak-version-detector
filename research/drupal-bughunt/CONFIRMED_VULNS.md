@@ -177,3 +177,29 @@ legacy/abandoned cluster (CodeQL pipeline running).
   username = email, emails are public → an attacker computes `md5(<email>.'en')` and **confirms/verifies
   any account** without inbox access (email-verification bypass). Fix: HMAC with the site hash-salt +
   `hash_equals`. (Register-form role mass-assignment was checked — no roles field exposed, FP.)
+
+## 12. filerequest (Drupal, abandoned) — MEDIUM — pre-auth access-control bypass (download access-restricted files) (ORIGINAL)
+- **Entry (pre-auth, bypasses Drupal grants):** `filerequest/throttle.php` is a standalone script
+  (`require_once("downloadhandler.php")` + `require("throttle.config.php")` at file scope; both
+  shipped) that streams a request-selected file via `__fr_process_download($config["filename"], …)`
+  (`throttle.php:30`) **before** Drupal bootstrap (`require("index.php")` is at `:46`, after the
+  `exit()`).
+- **Cause:** unlike the Drupal-native `_filerequest_download()` (`filerequest.module:115-118`, which
+  enforces `hook_file_download` grants), the throttle path performs **no grant/permission check**. The
+  only gate is a referer "antileech" that **returns true on an empty `Referer`**
+  (`downloadhandler.php:107`) — trivially bypassed. Path traversal to system files is blocked
+  (`__fr_file_create_path` does `realpath()` + `strncmp()` prefix-confine to `<base>/files/`), so this
+  is an **access bypass within `files/`**, not arbitrary FS read.
+- **Exploit:** `GET /sites/all/modules/filerequest/throttle.php?file=<path under files/>` with **no
+  Referer** → downloads private/access-controlled managed files anonymously (bypasses node/file
+  access). MED.
+
+## 13. audio_streaming_player (Drupal) — MEDIUM — pre-auth SSRF via standalone as_getnowplaying.php (ORIGINAL)
+- **Entry (pre-auth, bypasses Drupal):** `audio_streaming_player/NowPlaying/as_getnowplaying.php` is a
+  pure file-scope script — **no bootstrap, no auth**. Directly reachable:
+  `POST /sites/all/modules/audio_streaming_player/NowPlaying/as_getnowplaying.php`.
+- **Sink:** `$audio_streaming_player_stream_url = $_POST['audio_streaming_player_stream_url']` (`:7`) →
+  `$stream = fopen($audio_streaming_player_stream_url, 'r')` (`:22`) — attacker fully controls the
+  host/port/scheme with **no validation** (`http://169.254.169.254/latest/meta-data/`, `file:///etc/passwd`,
+  internal hosts). Reflection is limited to the ICY `StreamTitle` (≤39 chars), so it's blind/semi-blind
+  SSRF (+ marginal XSS only via an attacker-controlled ICY server). MED.

@@ -168,3 +168,12 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **acsf (Acquia Site Factory)** code-inj `AcsfMessage.php:159` (`$callback` is a constructor-injected
   Closure, server-side) + SSRF `AcsfMessageRest.php:48/73` (URL from `AcsfConfig::getUrl()`, config).
   No anonymous route reaches them (Drush/hooks). FP.
+
+## Standalone-script FPs (round-2 batch 2)
+- **addonchat** `addonchat_auth.php`/`addonchat_exit.php` — all SQL uses `%s`/`%d` placeholders,
+  password check uses `strcmp` (not `==`), output is `text/plain` (name never echoed), and the
+  CWD-relative `./includes/bootstrap.inc` include fatals in the module dir (only runs if copied to
+  docroot per INSTALL.txt). Residual: unauth un-rate-limited password oracle — not the target class. FP.
+- **admintheme** DataTables `ssp.php` — directly reachable but `require('../../../../examples/…/ssp.class.php')`
+  targets a file absent from the package (the whole `examples/` tree is missing) → fatal before `$_GET`
+  reaches any SQL; `$sql_details` creds empty. Dead code. FP.
