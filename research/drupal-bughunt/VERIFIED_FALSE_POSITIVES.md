@@ -330,3 +330,27 @@ escape/parameterize their filters — not a broken query.
 - **taxonomy_context** — concats at `:80/83/87/238` interpolate only core literals (`term`/`vocabulary`,
   `tid`/`vid`); data `%d`-bound; runs under `administer taxonomy`. `:493/531` build SQL from string
   literals. FP (no request string concatenated).
+
+## anon-JSON/autocomplete IDOR wave (accordions / aef_image / ajax_chain_select / autocomplete_google_places / autordf / biblio_autocomplete / appserver) — all cleared
+- **accordions** — `accordions/autocomplete` (`access=>TRUE`): `$string` only into parameterized
+  `db_select()->condition('name', db_like($string).'%','LIKE')`, returns admin-configured names,
+  `check_plain`'d. FP (request-as-key autocomplete).
+- **aef_image** — `aef_image/noderef_autocomplete` (`access content`): `$string` via `%s`+`$args` (escaped),
+  wrapped in `db_rewrite_sql()` (node-access enforced), output `check_plain`'d; the `unserialize` acts only
+  on stored CCK `data` columns, never request input. FP.
+- **ajax_chain_select** — `ajax_chain_select/callback` (`access=>TRUE`) base64-decodes `$dc`→function and
+  calls it, BUT only after `drupal_hmac_base64($value, private_key.hash_salt)` token check; anon cannot forge
+  the HMAC. FP (HMAC-gated dynamic dispatch).
+- **autocomplete_google_places** — `google/places/autocomplete/%/%/%` (`access=>TRUE`):
+  `drupal_http_request` uses **fixed host** `maps.googleapis.com`, `$string` only the `input=` value; resp
+  `check_plain`'d. FP (fixed-host fetch, not SSRF).
+- **autordf** — anon `autordf` just renders a form; `autordf/autocomplete` needs `access autordf tags` and
+  matches a fixed vocab; admin pages need `administer autordf`. FP (no anon sink).
+- **biblio_autocomplete** (biblio_ipni) — `biblio_ipni_*` (`access=>TRUE`): `file_get_contents` targets
+  **fixed host** `www.ipni.org`, `$string` only a query value; returns proxy of public botanical DB, no
+  Drupal data. FP (fixed-host fetch).
+- **appserver** — `app/export`,`app/query/%`,`apps/vote/%/%` (`access=>TRUE`): export uses
+  `taxonomy_select_nodes(...,FALSE)` (node_access-tagged, published-only) — **intended public app-catalog
+  export**, not IDOR; `$_REQUEST` only into `drupal_alter` (no implementer) / parameterized EFQ. NOTE:
+  `appserver_voting_vote()` allows anon vote-stuffing via `$_REQUEST['client_id']` — a vote-integrity logic
+  weakness, **out of the pre-auth disclosure/injection scope** (recorded for completeness, not a finding).

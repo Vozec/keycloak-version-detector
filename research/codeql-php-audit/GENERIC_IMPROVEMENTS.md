@@ -161,3 +161,22 @@ key (`SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `CONTEXT_DOCUMENT_ROOT`, `PWD`, `SERVER
 - Corpus: authcache FileInclusion hits `frontcontroller.php:41,42` → **0** (the exact FP from this round).
 
 Patch: `patches/server-superglobal-key-split.patch`.
+
+## 8. Open redirect: a constant `scheme://host` prefix pins the destination host (not a redirect)
+The open-redirect query flagged `header("Location: https://fixed.tld" . $_SERVER['REQUEST_URI'])` — but
+concatenating user input *after* a constant absolute-URL base only lets the attacker control the **path**,
+not the target host, so it cannot redirect off-site. This is the standard safe-redirect idiom
+(app anchors every redirect to its own origin). The semgrep-rules `redirect-to-request-uri` corpus marks
+exactly this shape `ok:`, and the pack was over-reporting it.
+
+Fix (query-scoped barrier in `OpenRedirect.ql`, not a global model change so nothing else is affected):
+a taint node is barriered when it is the **right operand of a `ConcatExpr` whose left operand is a
+`StringLiteral` matching `https?://<host-char>+`**. This is deliberately narrow:
+- The genuinely-unsafe `header("Location: " . $userInput)` has a bare `"Location: "` prefix (no scheme) →
+  **still flagged** (recall preserved).
+- A spoofable prefix like `$_SERVER['HTTP_HOST'] . $uri` is a *variable*, not a constant literal → **still
+  flagged** (we don't trust an attacker-influenced Host header as a pin).
+- Bench: **FP-on-ok 40→39, RECALL 183/232 unchanged** — the `redirect-to-request-uri.php:25`
+  `https://semgrep.dev` case clears; the five true `Location: `+`REQUEST_URI` positives above it stay flagged.
+
+Edit: `php/ql/src/Security/OpenRedirect.ql` (`hostPinnedConcatOperand` barrier + `import codeql.php.AST`).
