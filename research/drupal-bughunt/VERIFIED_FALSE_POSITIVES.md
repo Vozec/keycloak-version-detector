@@ -187,3 +187,14 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **booklists (D7)** `includes/booklists-ebooks.php` — prints a static HTML lightbox, serves **no
   files**; `catalog-url` flows only into Drupal `l()` (sanitized href), no download/`readfile` sink.
   Also `chdir('../../../../../../')` is one level too high → fatals in a standard install. FP.
+
+## Standalone-script FPs (round-2 batch 4)
+- **about/tools/cookieFactory.php** — cookie only `isset()`-tested, never reaches unserialize/eval/DB
+  (no `unserialize` in the file). Marginal REQUEST_URI-into-JS reflection only (browser-URL-encoded). FP.
+- **about_tools/mailman.php** — file-scope dispatch on `$_GET['a']`, but **every sink is commented out**
+  (`mysql_query` L60/93/103, the whole `mail()` assembly L100-107); `$sent` never set. Dead code. FP.
+- **groups/generate-utids.php & generate-ntids.php (D4.6/4.7)** — mutation gated by `$user->uid == 1`
+  (super-user); relative `include includes/bootstrap.inc` fails in module dir → `$user` null → access
+  denied anonymously. SQL is `%d`-parameterized. Auth-required + FP.
+- **drupalvb/drupalvb.inc.php (D7)** — functions-only (no top-level statements → no file-scope sink);
+  all queries use `:named` bound params; update uses a hardcoded column whitelist. FP.

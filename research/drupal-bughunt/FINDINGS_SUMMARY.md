@@ -15,7 +15,7 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
      over the corpus with the strict intra-module source filter (~140 candidates over 41 batches).
 - **~25 modules deep-audited in source** by the verification agent fleet.
 
-## CONFIRMED pre-auth findings (15, source-verified)
+## CONFIRMED pre-auth findings (16, source-verified)
 | # | Module | Sev | Class | State |
 |---|--------|-----|-------|-------|
 | 4 | **coolfilter** | HIGH | PHP **object injection** — bundled PHPRPC `rpc.php`/`mbstring.php` raw `unserialize($_REQUEST)`, no bootstrap → RCE via POP chain (+ `coolplayer.php` reflected XSS) | D5/6, abandoned |
