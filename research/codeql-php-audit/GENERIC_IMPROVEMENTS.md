@@ -201,3 +201,14 @@ Edit: `php/ql/lib/ext/php-builtins.model.yml` (dropped the fwrite path-traversal
   flickrhood #28 shape) → **flagged**; `header("Location: https://fixed.example.com".$_GET['path'])` →
   **cleared**; `header("Location: ".$_SERVER['HTTP_HOST'].$_GET['u'])` (spoofable variable prefix) → **still
   flagged**. The barrier suppresses only the constant scheme+host case, never a bare or variable prefix.
+
+## Validation (no change): modern JSON-body → httpClient SSRF is already covered
+Finding #30 (api_explorer, anon `/api-explorer/fetch` → `\Drupal::httpClient()->request($method,$url)`) was
+checked against the pack: **it is already flagged, no model change needed.** Micro-test end-to-end confirms
+the flow `$request->getContent()` (source: `["method","getContent","remote"]`) → `json_decode` (taint summary
+php-builtins:246 / TaintTracking.qll:32) → array-read `$data['url']` → `Client::request(method,URL)` (sink:
+`["method","request",1,"server-side request forgery"]`) is tracked, and the `filter_var($url,
+FILTER_VALIDATE_URL)` guard is correctly **not** a sanitizer (format-only, and its result isn't reassigned to
+`$url`). Recorded here so this coverage isn't "re-added" as a redundant class-scoped `Client` sink — which
+would risk short-name collisions (Predis/Solr `Client::get`) for no recall gain (corpus has no Guzzle
+positive). The pack's generic `["method","request",1,…]` already handles Guzzle / Symfony HttpClient / PSR-18.
