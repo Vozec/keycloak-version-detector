@@ -488,3 +488,29 @@ deep-audited. **All properly gated** (mirrors the "maintained modules' access pr
   userids; auth uses core `user_login` submit with strict `=== md5(md5(pw).salt)` and vB cookies are written
   only AFTER Drupal auth (no inbound cookie/sessionhash trusted); the only `unserialize` is on `{datastore}`
   DB data; no `drupal_http_request`/curl anywhere. FP (parameterized + server-derived + core-auth).
+
+## Access-bypass/IDOR/XSS wave (at_menu / basic_ads / arlo / badges_async / autoalt / aws_bedrock_chat) — all cleared (low notes)
+- **at_menu** (cheeseburger_menu) — `/cheeseburger-menu-render-request` renders a menu tree, but
+  `getMenuTree()` runs `menu.default_tree_manipulators:checkAccess` so only links the anon user may already
+  see are rendered; `block_id` not reflected; `current_route` used only in `strpos` (never output). FP (no XSS,
+  no meaningful disclosure). *(Low: missing block-access check + unfiltered taxonomy loadTree — informational.)*
+- **basic_ads** — `/ad/view/{nid}` returns only `{status,nid}` (no node fields → no IDOR); `/ad/click/{nid}`
+  redirects via `TrustedRedirectResponse` to `field_ad_link` read **from the node** (admin-authored, not
+  request); `placement` query arg only stored. Tracking uses int-cast/query-builder (no SQLi). FP. *(Low: anon
+  can track impressions on an unpublished basic_ad node.)*
+- **arlo** — `api/arlo/json` gates every action behind HMAC-SHA512 (`X-Arlo-Signature` vs
+  `hmac_sha512(body, base64_decode(webhook_key))`); `fetchEvent` uses a fixed Arlo host (config platform_id),
+  entityQuery `accessCheck(TRUE)`, returns only Success/Failure. FP (HMAC-gated + fixed host).
+- **badges_async** — `/badges-async/get/json` (commented `#_role:'authenticated'` NOT enforced → anon). Only
+  plugin `node_is_new`; uses `currentUser()->id()` (not a request uid) + `:uid`/`:nid` placeholders; output is
+  only `new`/`updated`/`''`. FP (no uid-IDOR, no SQLi). *(Low: `Node::load($attributes)` no access check →
+  new-in-7-days boolean oracle for arbitrary nid — trivial.)*
+- **autoalt** — `/api/autoalt/generate` loads a local `File` by `fid` and POSTs bytes to a **hardcoded**
+  `https://ahxdfj.autoalt.ai/...` (no request URL → SSRF FP); `fid` is an entity id (no traversal). *(Low
+  confirmed: unauth AI-credit-burn; `File::load($fid)` no access check → an anon can have an arbitrary/private
+  file's image sent to the 3rd-party API and get its description back = partial private-image leak; anon
+  `historyList`/`historyPage` (`access content`) expose the `autoalt_history` table. SQL uses builder +
+  `escapeLike` — no SQLi.)* FP for the dangerous-sink claims.
+- **aws_bedrock_chat** — `/aws-bedrock-chat/get-response`: model/agent/endpoint all from config, not request →
+  SSRF FP. User `message` is `Html::escape`'d where echoed; only LLM output is embedded (model-driven, not
+  reflected input). *(Low confirmed: unauth LLM proxy / credit burn.)* FP.
