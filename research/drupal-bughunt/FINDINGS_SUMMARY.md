@@ -25,6 +25,10 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
 | 1 | **cas** | LOW/MED | **unauth DB write** — `/casproxycallback` stores attacker `pgtId`/`pgtIou`, no origin check (`@todo` in code) → DoS / bounded PGT injection | **current** |
 | 7 | **trackback** | MED | anonymous **blind SSRF** — `drupal_http_request($_REQUEST[url])`, no host filter (config-gated) | D6, abandoned |
 | 2 | **mailchimp** | LOW | **webhook auth fail-open** — `if (!empty($hash) && !hash_equals(...))` skips auth when `webhook_hash` unset (default) | **current** |
+| 9 | **amocrm_widget** | CRITICAL | anonymous **arbitrary function invocation** (`$_POST['callback']($_POST)`, `function_exists`-gated only) + **auth bypass** by api_key (`==`) | D7, abandoned |
+| 10 | **api_normalization** | MED/HIGH | anonymous **entity IDOR** — `transformEntity` loads any entity by id, no `->access()` check → unpublished/user fields as JSON-LD | **current** (^10-^11) |
+| 11 | **better_register** | MED | **forgeable email-verify token** — `md5(email.langcode)`, no secret, `==` compare → verify any account | D8 |
+| 8 | **statichtml** | LOW/MED | pre-auth **path traversal** — standalone `static.php`, `$_GET[id]`→`fopen`, no bootstrap (writable-file read) | pre-D6, abandoned |
 
 ## The pattern (same as TYPO3)
 - **Maintained modules' access primitives are solid** — the public-route audit cleared plupload
