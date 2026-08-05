@@ -394,3 +394,48 @@ legacy/abandoned cluster (CodeQL pipeline running).
   No SQLi/RCE (module fixed to `booklists`, `$delta` is only a lookup key; unknown delta → empty block).
   Bounded info disclosure. LOW/MED.
 - **Exploit:** `GET /sites/all/modules/booklists/includes/booklists.block.php?b2e=<delta>` (e.g. `nyt-block-1`).
+
+## 30. api_explorer (Drupal ^11, current) — CRITICAL — pre-auth full-read SSRF (ORIGINAL)
+- **Entry (pre-auth):** route `api_explorer.fetch` `/api-explorer/fetch` (`api_explorer.routing.yml:9-16`,
+  **`_access: 'TRUE'`**, POST, no CSRF, no permission) → `ApiExplorerController::fetch`.
+- **Source→Sink:** `fetch()` (`src/Controller/ApiExplorerController.php:23`) reads `url`/`method`/`headers`/
+  `body` from the JSON request body (`:25-28`); the only check is `filter_var($url, FILTER_VALIDATE_URL)`
+  (`:34`) — which accepts **any** `http(s)://` host incl. internal IPs / `localhost` / cloud metadata — then
+  `\Drupal::httpClient()->request($method, $url, $options)` (`:55`) with `verify => false`,
+  `http_errors => false`. Attacker controls method, headers, and body.
+- **Full-read (non-blind):** the upstream **status + headers + raw body + parsed JSON** are returned to the
+  anonymous caller (`:70-78`) → readable SSRF, not blind.
+- **Exploit:** `POST /api-explorer/fetch` `{"url":"http://169.254.169.254/latest/meta-data/iam/security-credentials/"}`
+  → cloud IMDS credentials; also `http://127.0.0.1:<port>/…` internal admin/APIs, internal HTTPS (verify off),
+  and network mapping via status/timing. **CRITICAL** (unauthenticated full-read SSRF, current ^11 module).
+- **Root cause:** `FILTER_VALIDATE_URL` is a *format* validator, not an SSRF guard (no host/IP allow-list, no
+  private-range block). Same class as the codeql-php SSRF backlog: model `httpClient()->request()` as an SSRF
+  sink so RemoteFlowSource→URL is flagged (a `FILTER_VALIDATE_URL` is not a sanitizer for it).
+
+## 31. betting (Drupal 6, abandoned) — CRITICAL — pre-auth SQL injection via arg(2) (ORIGINAL)
+- **Entry (pre-auth):** `betting/offer`, `betting/pending`, `betting/results` (`betting.module:84-104`,
+  `page callback => betting_games_view`, `access arguments => array('access content')` = **anonymous**).
+  D6 `menu_get_ancestors()` fall-through routes the deeper path `betting/offer/<X>` to the registered
+  2-segment `betting/offer` callback, so `arg(2)` (the 3rd segment) is attacker-controlled.
+- **Source→Sink:** `betting_games_view($type)` (`:1819`) does `if ($tid = arg(2)) { $taxonomy =
+  ' AND t.tid = '.$tid; }` (`:1824-1825`) — **`arg(2)` string-interpolated with no cast/placeholder/escape** —
+  then `$taxonomy` is embedded in the `offer`/`pending`/`results` query (`:1837/1846/1855`) and executed by
+  `pager_query($query, 10, 0, $query_count)` (`:1859`); the count query copies the injected string via
+  `ereg_replace`, so it runs twice.
+- **Exploit (anonymous):** `GET /betting/offer/0) UNION SELECT pass FROM users WHERE uid=1-- -`
+  (numeric context `t.tid = <INJECT>`). UNION / error / blind SQLi → full DB read (password hashes).
+  **CRITICAL** — same class as track #27 but a taxonomy-id sink.
+
+## 32. block_quiz (Drupal 6, abandoned) — HIGH — pre-auth PHP object injection via $_POST (ORIGINAL)
+- **Entry (pre-auth):** `block_quiz/answer_js` (`block_quiz.module:51-55`, `page callback => block_quiz_js`,
+  `access arguments => array('access content')` = **anonymous** AHAH handler).
+- **Source→Sink:** `block_quiz_js()` sets `$form_state['post'] = $_POST` (`:204`) — independent of the
+  `form_get_cache()` lookup above it — then `:209` `unserialize($form_state['post']['block_quiz_content'])`,
+  i.e. **raw `unserialize` of fully client-controlled `$_POST`, no `['allowed_classes'=>false]`** (D6/PHP5).
+  The invalid-form-cache path only emits non-fatal PHP5 warnings (`array_shift(NULL)`) and still falls through
+  to `:209`; a valid `form_build_id` (obtainable by loading the anonymous block once) gives a clean path.
+- **Exploit:** `POST /block_quiz/answer_js` with `block_quiz_content=<serialized POP-gadget object>` (+ any
+  `form_build_id`) → object instantiated during unserialize → object injection (RCE gadget-dependent). Same
+  class as coolfilter #4 / referral #25 / accuweather #26. HIGH.
+  (Side note: `admin/settings/block_quiz/view` & `/add` set `access callback => TRUE` alongside the
+  permission, so the boolean TRUE wins → those admin *views* are anon-readable; writes stay gated. Low.)

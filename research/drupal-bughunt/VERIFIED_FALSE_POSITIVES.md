@@ -454,3 +454,37 @@ deep-audited. **All properly gated** (mirrors the "maintained modules' access pr
   closed on empty; action runs after; the GitLab fetch is a stub (no real outbound) → no SSRF. FP.
 - **akismet_antispam** `/akismet/v1/webhook` — body `key` `hash_equals` vs site Akismet key (`:83`), fails
   closed (empty→401, unconfigured→503); side effects only after auth. FP (minor: case-insensitive compare).
+
+## Proxy/SSRF wave (api_proxy / alert_telegram / api_insight_lab / billing_hub / bitpay) — 1 confirmed (#30 api_explorer), 5 cleared
+- **api_proxy** — `/api-proxy/{api_proxy}` (`_access:'TRUE'`) but `Forwarder::forward` enforces a per-proxy
+  `hasPermission('use <id> api proxy')` (`Forwarder.php:66`), AND the target host is the plugin's hard-coded
+  `serviceUrl` annotation — `HttpApiPluginBase::forward` builds `rtrim(getBaseUrl(),'/').'/'.ltrim(path,'/')`
+  so user input contributes only path+query, never the host (leading `//` stripped). FP (fixed-host allow-list).
+- **alert_telegram** — `/alert-telegram/webhook/{secret}`: strict `$secret !== $webhook_secret` (`:106`, type-safe,
+  not `==`); route regex `secret:'.+'` requires ≥1 char and there's no `config/install` default, so an empty
+  config secret can never equal a mandatory non-empty path segment (no empty-default bypass). Body → parameterized
+  inserts + `Html::escape` + fixed Telegram API. FP.
+- **api_insight_lab** — `/api/test/echo` returns a **JsonResponse** (application/json), input echoed but not HTML
+  → no reflected XSS. FP (non-HTML sink).
+- **billing_hub** — `/billing/webhook/{gateway_id}`: `verifyWebhook($request)` runs BEFORE business logic
+  (`WebhookDispatcherService:73`), Stripe gateway uses `\Stripe\Webhook::constructEvent` and fails closed on
+  empty `webhook_secret`. No state change on forged/unsigned request. FP (fail-closed signature).
+- **bitpay** — `/bitpay/callback`: reads only `webhook->id` from the body, then **re-fetches the authoritative
+  invoice** via the authenticated BitPay client (`getInvoice($id)`, `:45`); attacker payload can't inject a
+  "paid" status. FP (server-side IPN re-verification — the recommended pattern).
+
+## Anon-callback SQLi wave 2 (epublish / agree_threshhold / bassets_server / drupalvb) — 2 confirmed (#31 betting, #32 block_quiz), 4 cleared
+- **epublish** — anon `epublish`/`headlines` reach raw-concat queries, but every concatenated fragment is
+  parameterized (`$pub` via `%d`/`%s`) or regex-digit-constrained (`$ed`→`preg_match('/(v([0-9]+))?(n([0-9]+))?/')`
+  → digit-only `$volume`/`$number`); other interpolated pieces are `variable_get`/DB/`%d`-derived. FP.
+- **agree_threshhold** — anon `ajax/agree/%/%/%` path uses `:named` placeholders throughout; the raw-concat
+  queries live in `agree_threshhold_cron()` (not HTTP-reachable) with `{field_config}` schema names. FP.
+- **bassets_server** — anon `bassetsfile/%`/`bassetsajax/%` run no `db_query` on request input (cache_get +
+  entity_uuid_load; `$_POST['file']['id']` used only as a filesystem path); the one raw-concat query
+  (`WHERE $algo = :hash`) has a server-defined `$algo` + parameterized `:hash` and runs only in an
+  authenticated upload validate hook. FP.
+- **drupalvb** (Drupal↔vBulletin bridge) — all request-derived usernames flow through `:username`/`:userid`
+  named placeholders wrapped in `drupalvb_htmlspecialchars()`; raw `IN(…)` clauses implode vB-DB-returned
+  userids; auth uses core `user_login` submit with strict `=== md5(md5(pw).salt)` and vB cookies are written
+  only AFTER Drupal auth (no inbound cookie/sessionhash trusted); the only `unserialize` is on `{datastore}`
+  DB data; no `drupal_http_request`/curl anywhere. FP (parameterized + server-derived + core-auth).

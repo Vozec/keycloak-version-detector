@@ -23,7 +23,7 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
   re-read in source, every cleared candidate ledgered with its reason (incl. module-classes to skip:
   distro forks, API-response hydrators, properly-controlled callbacks).
 
-## CONFIRMED pre-auth findings (29, source-verified)
+## CONFIRMED pre-auth findings (32, source-verified)
 | # | Module | Sev | Class | State |
 |---|--------|-----|-------|-------|
 | 4 | **coolfilter** | HIGH | PHP **object injection** — bundled PHPRPC `rpc.php`/`mbstring.php` raw `unserialize($_REQUEST)`, no bootstrap → RCE via POP chain (+ `coolplayer.php` reflected XSS) | D5/6, abandoned |
@@ -56,6 +56,9 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
 | 27 | **track** | HIGH | pre-auth **SQL injection** — anon `track/ajax/detail/<nid>` concatenates raw URL segment into `db_query(... WHERE nid='.$nid)`, no `%d` (branch gated by `?action=initsync`) | D6, abandoned |
 | 28 | **flickrhood** | MED | pre-auth **open redirect** — bundled `phpFlickr/auth.php` runs at file scope; `header("Location: ".$_GET[extra])`, reached via `?frob=1` (auth_getToken does not exit) | D6/7 lib |
 | 29 | **booklists** | LOW/MED | pre-auth **block-visibility bypass** — `booklists.block.php` bootstraps full, no access check; `$_GET[b2e]`→`block_load`→`drupal_render` renders any booklists block ignoring visibility/role | D6/7 |
+| 30 | **api_explorer** | CRITICAL | pre-auth **full-read SSRF** — anon `/api-explorer/fetch` passes request `url` (only `FILTER_VALIDATE_URL`) to `httpClient()->request()` (`verify=>false`), returns full upstream response → cloud-metadata/internal read | **current** (^11) |
+| 31 | **betting** | CRITICAL | pre-auth **SQL injection** — anon `betting/offer/<X>` (D6 fall-through) puts `arg(2)` raw into `pager_query` `AND t.tid = <INJECT>` | D6, abandoned |
+| 32 | **block_quiz** | HIGH | pre-auth **PHP object injection** — anon `block_quiz/answer_js` reaches `unserialize($_POST[block_quiz_content])`, no `allowed_classes` | D6, abandoned |
 
 Plus authenticated/secret-gated real bugs (addressbook SQLi behind `view addressbook`; bd_video request-`unserialize` behind a per-video secret) — recorded in `VERIFIED_FALSE_POSITIVES.md` as not-default-pre-auth.
 
