@@ -542,3 +542,13 @@ import_html, devel, entity_browser, apex_ai, azure_ad) → 72 raw candidates; hi
   import UI/batch/Drush. **No anonymous entry point** → the entire import_html candidate cluster is FP (admin-gated).
 - (Medium-sev leftovers — blockchain open-redirect `BlockchainController:72`, azure_ad logger XSS,
   annotations export path-traversal — are in export/admin/logger paths, not anon request→sink; not pursued.)
+
+## CodeQL discovery batch #2 (12 modules: tfa/appointments/bookit/ai_search_block/achlaai_search/anu_lms/migrate_plus/action_link/flag/xmlsitemap/agtp/billing_hub) — clean, 0 anon findings
+16 raw candidates, all cleared: hardcoded-key in tfa `McryptAES128Encryption`/`TfaRecoveryCode` (per-user
+auth'd recovery-code encryption, legacy Mcrypt plugin — not pre-auth) and achlaai_search `OwnershipProtocol`;
+ai_search_block Reflected XSS in a **SettingsForm** (admin); migrate_plus path-traversal in the XML data_parser
+(migration/Drush, admin); action_link `StateActionPlugin.php:129` "code injection" is
+`$pluginManager->{$element['#plugins_method']}()` where `#plugins_method` is a **form-element definition value**
+set by the form builder (developer/admin), not request input, in a render Element (not an anon route);
+action_link type-juggling in `StateActionBase:340`. No anonymous request→dangerous-sink flow. (These modern
+modules are clean — consistent with the "maintained modules are solid" pattern.)
