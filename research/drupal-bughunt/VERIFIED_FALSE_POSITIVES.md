@@ -314,3 +314,19 @@ escape/parameterize their filters — not a broken query.
 - **kasahorow/kdictionary (D6)** — the 9 `unserialize()` sinks all take `{kdictionary}` column values
   (`children`/`langindex`/`editor`/`alphabets`); `$_GET['id']`→`WHERE did='%s'`, `arg(1)`→`WHERE iso='%s'`
   are lookup keys only. Callbacks are `use dictionary`/`administer dictionary` permission-gated. FP.
+
+## SQLi wave (checkout / gradebook / ejournal / taxonomy_context) — all cleared
+- **checkout** (D6) — `checkout.module:345-346` `db_query("… WHERE nid = %d".$add_sql,$args)`: the
+  concatenated `$add_sql` is only a **static literal** `" AND uid = %d"`; tainted `$nid`/`$uid` bound via
+  `%d`. No anon entry (hook_init gated by `$user->uid && user_access`). FP (static-literal concat).
+- **gradebook** (D5-era) — `IN (…)` concats at `:423/919/950` interpolate `$str_uids`/`$str_rids` that are
+  **server-derived** (UIDs from `gradebookapi_get_students()`/`{users_roles}`, RIDs from `user_roles()`).
+  Anonymous `gradebook/<tid>` reaches `:423` but no request value reaches the concat; `$_GET['order'/'sort']`
+  go to a different, non-concatenated path. FP (server-derived IN-list — request-as-key non-pattern kin).
+- **ejournal** (v0.92) — only raw-concat request value is `$iid` at `:2178`, but both callers (`:1832/2020`)
+  are **chief-editor/editor** admin forms (auth-required). Every concat reachable from anon
+  `ejournal_public_page` (`access content`) is `%d`-bound or `db_escape_string`'d (`:724/1355/3315`). Not
+  pre-auth (authenticated-only real sink).
+- **taxonomy_context** — concats at `:80/83/87/238` interpolate only core literals (`term`/`vocabulary`,
+  `tid`/`vid`); data `%d`-bound; runs under `administer taxonomy`. `:493/531` build SQL from string
+  literals. FP (no request string concatenated).

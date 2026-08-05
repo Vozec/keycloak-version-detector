@@ -348,3 +348,19 @@ legacy/abandoned cluster (CodeQL pipeline running).
 - **Exploit:** `GET /accuweather` with `Cookie: accuweather_city=<serialized POP-gadget object>` → object
   instantiated during unserialize → object injection (RCE gadget-dependent). Same class as referral #25,
   coolfilter #4, banner #5. HIGH.
+
+## 27. track (Drupal 6, abandoned) — HIGH — pre-auth SQL injection via URL path segment (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `track/ajax/detail` (`track.module:73-77`,
+  `page callback => trackback_detail`, `access callback => user_access` /
+  `access arguments => array('access content')` = **anonymous**, `MENU_CALLBACK`). In D6 the trailing
+  path segment is passed positionally, so `track/ajax/detail/<nid>` → `trackback_detail($nid)` with
+  `$nid` = the raw URL segment (no `intval`/quoting).
+- **Sink:** `trackback_detail()` (`track.module:155`) builds a `GoogleMap`, `Init()` sets
+  `mapaction = $_GET['action']` (`track.google.map.inc:42`); when `action == "initsync"` it runs
+  `db_query('SELECT … FROM {track} WHERE nid='.$nid)` (`track.module:164`) — **raw string concatenation
+  of the request-controlled `$nid`, no `%d` placeholder, no escaping** (numeric context). Same raw-concat
+  reachable at `:241` (`initsync` in a sibling callback).
+- **Exploit (UNION / boolean oracle):**
+  `GET /?q=track/ajax/detail/0 UNION SELECT name,pass,3,4,5,6 FROM users LIMIT 1&action=initsync`
+  (6 columns match the 6 aggregate selects), or boolean `…/1 AND 1=1` vs `…/1 AND 1=2`. Full pre-auth DB
+  read (password hashes). HIGH. Distinct module from #7 trackback (that one is SSRF).
