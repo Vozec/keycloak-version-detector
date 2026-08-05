@@ -232,3 +232,16 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
 - **ajaxchat (D7)** `ajaxchat_router` — bundled blueimp AJAX Chat glue; every SQL value goes through
   `makeSafe()` (mysqli escape), output HTML-encoded, identity from the Drupal session (guest fallback by
   design). No raw request→SQL/HTML sink. FP.
+
+## D7 anonymous callbacks that die on a concrete mitigation (wave 3)
+- **appserver** `app/export` — the manifest (`appserver.export.inc:30-61`) is public app-listing data
+  (name/version/author/rating); no secrets/creds/paths/module-list. `app/export` passes literal `"export"`
+  → `taxonomy_term_load` returns FALSE → returns nothing. FP.
+- **available_updates_d7** `available_updates_d7.json` — the module/version/core fingerprint disclosure is
+  gated by `$_SERVER['REMOTE_ADDR'] == '18.130.46.80'` (`:34`, socket peer, **not** X-Forwarded-For) →
+  not spoofable remotely; everyone else gets `"no"`. FP (residual: IP-auth fragility noted).
+- **phpbb2drupal** `viewtopic.php` — `$_GET[t|p|f]` are `is_numeric`-guarded + parameterized
+  `->condition()`; redirect targets are internal paths from DB integers. No open redirect/SQLi. FP.
+- **adaptive_payments** `paypal_redirect/%/%` — lives in the `adaptive_payments_test` example submodule;
+  `$cmd`/`$key` go only into the query string after the fixed `https://www.paypal.com/webscr?` (host fixed);
+  no order/payment state mutation. FP.

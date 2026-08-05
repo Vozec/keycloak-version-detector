@@ -280,3 +280,11 @@ legacy/abandoned cluster (CodeQL pipeline running).
   permission (which anonymous does not hold by default). SQLi is a FP (`api_object_load` uses parameterized
   `db_select()->condition()`); `$doc->code` is server-pre-escaped (no XSS).
 - **Exploit:** `GET /api/source/123/function`, iterate `did` to dump the site's indexed PHP source. MED.
+
+## 21. ajax_dlcount (Drupal 7) — LOW — anonymous DB mutation (counter inflation + storage DoS) (ORIGINAL)
+- **Entry (pre-auth):** hook_menu `file/%/dlcounter` (`access callback => TRUE` overrides the `access
+  content` arg, `:14-21`) → `ajax_dlcount_count()` (`:37`), anonymous GET, **no CSRF token**.
+- **Cause:** for **any** `$fid` (no existence check) it `UPDATE file_dlcount` (`:50`) / `INSERT INTO
+  file_dlcount` (`:53`). `GET /file/<n>/dlcounter` inflates the public download counter and seeds
+  unbounded junk rows (storage DoS). Per-IP dedup is bypassable via rotating IPs and resets after the
+  24h retention cron. **SQLi is a FP** — all queries use named placeholders (`:fid`,`:ip`). LOW.
