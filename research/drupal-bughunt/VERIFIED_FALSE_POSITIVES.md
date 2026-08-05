@@ -297,3 +297,7 @@ escape/parameterize their filters — not a broken query.
 - **ark** `ark:/%/%` — `$naan` must equal the site's configured NAAN; redirect target is `entity_uri()`
   of a server-side-matched local entity (not attacker URL); lookups use `:named` placeholders. No open
   redirect, no SQLi. FP.
+
+- **ajax_checklist (D6)** `ajaxchecklist/loadnid` — anonymous, but `db_query` uses `%d` placeholders
+  (nid/uid integer-coerced); the `'user-%'` literal wildcards consume no placeholders; no `unserialize`;
+  only non-sensitive checkbox state exposed. FP.

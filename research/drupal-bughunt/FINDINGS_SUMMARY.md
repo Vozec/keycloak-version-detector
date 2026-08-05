@@ -23,7 +23,7 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
   re-read in source, every cleared candidate ledgered with its reason (incl. module-classes to skip:
   distro forks, API-response hydrators, properly-controlled callbacks).
 
-## CONFIRMED pre-auth findings (23, source-verified)
+## CONFIRMED pre-auth findings (25, source-verified)
 | # | Module | Sev | Class | State |
 |---|--------|-----|-------|-------|
 | 4 | **coolfilter** | HIGH | PHP **object injection** — bundled PHPRPC `rpc.php`/`mbstring.php` raw `unserialize($_REQUEST)`, no bootstrap → RCE via POP chain (+ `coolplayer.php` reflected XSS) | D5/6, abandoned |

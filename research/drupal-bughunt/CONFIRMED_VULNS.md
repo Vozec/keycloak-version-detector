@@ -313,3 +313,28 @@ legacy/abandoned cluster (CodeQL pipeline running).
   (+ the DevShop public key) to any anonymous caller — high-value recon for attacking the hosting
   infrastructure. MED. (The sibling `keys/%` route targets `devshop_servers_user_keys`, defined in the
   external `devshop_servers` module — not vendored here, so unconfirmable from this source.)
+
+## 24. blackbaud_netcommunity_sso (Drupal 7) — HIGH — pre-auth account takeover via signature-scope gap (ORIGINAL)
+- **Entry (pre-auth):** `bbuser` (`blackbaud_netcommuniy_sso.module:8-11`, **`access callback => TRUE`**)
+  stores `$_SESSION['bbuser_information'] = serialize($_GET)` (`:57`) — the attacker's arbitrary
+  `?email=&username=` go into the session **unsigned**. Then the `/callback` signin runs.
+- **Cause (signature-scope gap):** the SSO MAC `$in_sig == $signature` (`:183`) validates
+  `md5($userid.$ts.$secret)` — it covers **only `userid` + `ts`, NOT the email/username** that select
+  the Drupal account. `blackbaud_netcommuniy_sso_signin` does `user_load_by_mail($email)` on the
+  **attacker-supplied** email, links the attacker's `buid` to the victim uid, overwrites the victim's
+  mail/name, then `user_login_submit()` (`:133/227`) → the attacker is **logged in as the victim/admin**.
+- **Exploit:** with any one valid Blackbaud assertion for the attacker's **own** account (relative to
+  Drupal they're anonymous): `GET /bbuser?email=admin@site&username=x`, then
+  `GET /callback/blackbaud?userid=<attacker_buid>&ts=…&sig=<valid-for-attacker>` → session as admin.
+- Contributing weaknesses: `==` not `hash_equals` (`:183,318`), home-rolled `md5` not HMAC, `ts` never
+  checked → unlimited replay. (The `:157` `unserialize` is a `serialize($_GET)` roundtrip — not POI.) HIGH.
+
+## 25. referral (Drupal 6, abandoned) — HIGH — pre-auth PHP object injection via cookie at registration (ORIGINAL)
+- **Entry (pre-auth):** on anonymous user registration — `hook_user` `case 'insert'` →
+  `_referral_user_save($arg_user->uid)` (`referral.module:195-197`).
+- **Sink:** `_referral_user_save()` does `$cookie = unserialize($_COOKIE['referral_data'])`
+  (`referral.module:172`) — **raw `unserialize` of a fully client-controlled, unsigned cookie, no
+  `['allowed_classes'=>false]`** (D6/PHP5). Object-injection primitive (RCE gadget-dependent).
+- **Exploit:** submit `/user/register` with `Cookie: referral_data=<serialized POP-gadget object>` →
+  object instantiated during registration. `db_query` are `%d`/`%s`-parameterized (no SQLi); the
+  http_referer stored-XSS is admin-only + `check_plain`'d (no finding). HIGH.
