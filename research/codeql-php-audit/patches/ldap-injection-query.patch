@@ -1,0 +1,74 @@
+From 251fc5e15366c2933a82e292b73c9ab71220bb3e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 5 Aug 2026 08:51:55 +0000
+Subject: [PATCH] feature: LDAP injection query (CWE-090) + models -
+ ldap_search/list/read filter+DN args, Symfony Ldap::query, ldap_escape
+ sanitizer; new sink kind, bench recall unchanged 183/232
+
+---
+ php/ql/lib/ext/ldap-injection.model.yml | 26 +++++++++++++++++++++++++
+ php/ql/src/Security/LdapInjection.ql    |  7 ++++---
+ 2 files changed, 30 insertions(+), 3 deletions(-)
+ create mode 100644 php/ql/lib/ext/ldap-injection.model.yml
+
+diff --git a/php/ql/lib/ext/ldap-injection.model.yml b/php/ql/lib/ext/ldap-injection.model.yml
+new file mode 100644
+index 00000000000..4169fb1ed34
+--- /dev/null
++++ b/php/ql/lib/ext/ldap-injection.model.yml
+@@ -0,0 +1,26 @@
++# LDAP injection Models-as-Data. User input concatenated into an LDAP filter/DN without `ldap_escape`
++# lets an attacker alter the search — auth bypass (`*)(uid=*))(|(uid=*`), attribute disclosure, etc.
++# (CWE-090). The filter argument is the sink; `ldap_escape` is the sanitizer. Procedural PHP LDAP +
++# Symfony\Component\Ldap (used by Drupal `ldap`, ldap_addressbook, ldap_integration, pubcookie, …).
++extensions:
++  - addsTo: { pack: codeql/php-all, extensible: sinkModel }
++    data:
++      # ldap_search($link, $base, $filter, …) / ldap_list / ldap_read — the FILTER is arg 2 (0-based).
++      - ["function", "ldap_search", 2, "ldap injection"]
++      - ["function", "ldap_list", 2, "ldap injection"]
++      - ["function", "ldap_read", 2, "ldap injection"]
++      # The base DN (arg 1) is also injectable when built from user input.
++      - ["function", "ldap_search", 1, "ldap injection"]
++      - ["function", "ldap_list", 1, "ldap injection"]
++      - ["function", "ldap_read", 1, "ldap injection"]
++  - addsTo: { pack: codeql/php-all, extensible: typedSinkModel }
++    data:
++      # Symfony\Component\Ldap\Ldap::query($dn, $filter, $options) — filter (arg 1) and base DN (arg 0).
++      - ["Ldap", "query", 1, "ldap injection"]
++      - ["Ldap", "query", 0, "ldap injection"]
++      # Adapter/Connection query variants some versions expose.
++      - ["LdapInterface", "query", 1, "ldap injection"]
++      - ["LdapInterface", "query", 0, "ldap injection"]
++  - addsTo: { pack: codeql/php-all, extensible: sanitizerModel }
++    data:
++      - ["function", "ldap_escape"]          # PHP 5.6+ RFC-4515/4514 escaper — the correct fix
+diff --git a/php/ql/src/Security/LdapInjection.ql b/php/ql/src/Security/LdapInjection.ql
+index 62a53d8b259..e4ea35a05c3 100644
+--- a/php/ql/src/Security/LdapInjection.ql
++++ b/php/ql/src/Security/LdapInjection.ql
+@@ -1,9 +1,10 @@
+ /**
+  * @name LDAP injection
+- * @description User input reaches a LDAP query, enabling LDAP injection.
++ * @description User input concatenated into an LDAP filter or DN without escaping enables LDAP
++ *              injection (authentication bypass, unauthorized attribute disclosure).
+  * @kind path-problem
+  * @problem.severity error
+- * @security-severity 8.8
++ * @security-severity 8.5
+  * @precision high
+  * @id php/ldap-injection
+  * @tags security
+@@ -18,7 +19,7 @@ import codeql.php.security.FlowSources
+ module Cfg implements DataFlow::ConfigSig {
+   predicate isSource(DataFlow::Node n) { n instanceof RemoteFlowSource }
+ 
+-  predicate isSink(DataFlow::Node n) { n.(Sink).getKind() = "LDAP injection" }
++  predicate isSink(DataFlow::Node n) { n.(Sink).getKind() = "ldap injection" }
+ 
+   predicate isBarrier(DataFlow::Node n) { n instanceof Sanitizer }
+ }
+-- 
+2.43.0
+

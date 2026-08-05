@@ -111,3 +111,17 @@ same-named non-SQL methods are dropped.
   (taint at arg 1) → **no SQLi alert**. Exactly the intended split.
 
 Patch: `patches/query-arg0.patch`.
+
+## 5. New query: LDAP injection (CWE-090) — turns the `Ldap::query` "SQLi" mislabel into a real bug class
+Investigating the `ldap` module's "SQL injection" FPs revealed they are actually **LDAP** queries
+(`Symfony\Component\Ldap\Ldap::query($dn, $filter)`, procedural `ldap_search/list/read`). Rather than
+only suppress them, added a proper **LDAP-injection** sink kind + `LdapInjection.ql`: user input into
+an LDAP **filter** or **base DN** without `ldap_escape` → auth bypass (`*)(uid=*))(|(uid=*`) / attribute
+disclosure. `ldap_escape` (PHP 5.6+) is the sanitizer.
+- New sink kind `"ldap injection"`; `bench/run.sh` recall **unchanged 183/232** (additive, no effect on
+  existing kinds).
+- Correctly **0 findings** on the maintained `ldap` module (properly escaped) — no FP on clean code.
+- Wired into the TYPO3 + Drupal batch pipelines to run corpus-wide alongside the 9 existing queries.
+- Model: `ext/ldap-injection.model.yml`; query: `src/Security/LdapInjection.ql`.
+
+Patch: `patches/ldap-injection-query.patch`.
