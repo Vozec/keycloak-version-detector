@@ -15,7 +15,7 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
      over the corpus with the strict intra-module source filter (~140 candidates over 41 batches).
 - **~25 modules deep-audited in source** by the verification agent fleet.
 
-## CONFIRMED pre-auth findings (6, source-verified)
+## CONFIRMED pre-auth findings (7, source-verified)
 | # | Module | Sev | Class | State |
 |---|--------|-----|-------|-------|
 | 4 | **coolfilter** | HIGH | PHP **object injection** — bundled PHPRPC `rpc.php`/`mbstring.php` raw `unserialize($_REQUEST)`, no bootstrap → RCE via POP chain (+ `coolplayer.php` reflected XSS) | D5/6, abandoned |
@@ -23,6 +23,7 @@ logged with its reason in `VERIFIED_FALSE_POSITIVES.md`.
 | 5 | **banner** | MED | **path traversal + `unserialize`** — standalone `banner_file.php`, `$_GET[path]` → `fopen`/`unserialize` before bootstrap | D6, abandoned |
 | 3 | **social_auth** | MED/HIGH | **account takeover** — links to existing account by provider email, no `email_verified` check, no toggle | **current** (^9.5-^11), provider-dependent |
 | 1 | **cas** | LOW/MED | **unauth DB write** — `/casproxycallback` stores attacker `pgtId`/`pgtIou`, no origin check (`@todo` in code) → DoS / bounded PGT injection | **current** |
+| 7 | **trackback** | MED | anonymous **blind SSRF** — `drupal_http_request($_REQUEST[url])`, no host filter (config-gated) | D6, abandoned |
 | 2 | **mailchimp** | LOW | **webhook auth fail-open** — `if (!empty($hash) && !hash_equals(...))` skips auth when `webhook_hash` unset (default) | **current** |
 
 ## The pattern (same as TYPO3)

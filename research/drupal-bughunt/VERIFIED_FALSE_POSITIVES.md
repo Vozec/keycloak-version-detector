@@ -104,3 +104,14 @@ read in source. Recorded so the map's 207 entry points aren't mistaken for 207 b
   unescaped part is a config path. FP.
 - **nutch** `nutch.admin.inc:202/211` — reachable only via `admin/settings/nutch/*` behind
   `administer nutch`, and every command component is `escapeshellarg()`'d. Auth-required + escaped. FP.
+
+## zina (D6) — bundled app is functions-only, all sinks auth-gated (FP for pre-auth)
+- `zina/zina/index.php` (Zina 2.0b22) is a **pure function library** (opens `function zina($conf)`,
+  every top-level construct is a def, no file-scope executable code); direct `GET …/index.php` runs
+  nothing. The vestigial `zina/.htaccess` rewrites to a non-existent `zina/index.php`. All sinks are
+  reached only via `zina.module`→`zina_main()` behind `user_access('access zina')` (`zina.module:91`).
+- `passthru()` cmd-injection (`:6544/6547`, `mp3s`→zip, only `..`-filtered, no `escapeshellarg`) is a
+  **real bug but auth-required** (`access zina`) AND needs the non-default `cmp_sel==1` (default 0).
+- Code-injection `:994` is `in_array`-whitelisted; `:4265/4291/4304` `call_user_func` over hard-coded
+  form-def strings (not request). Unserialize `common.php:349/351` feeds on `$_SESSION`/file/DB ID3
+  data, never `$_GET/$_POST/$_COOKIE`. No pre-auth object injection.

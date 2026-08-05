@@ -110,3 +110,18 @@ legacy/abandoned cluster (CodeQL pipeline running).
   deployed as a DruTeX **remote-render server** (its intended role), it is unauthenticated RCE.
 - **Caveat:** Drupal 5-era (abandoned), and exploitation requires the remote-render config enabled.
   But no Drupal login is involved and the injection is unescaped. HIGH (config-conditional).
+
+## 7. trackback (Drupal 6, abandoned) — MEDIUM — anonymous (blind) SSRF (ORIGINAL, config-gated)
+- **Entry (pre-auth):** `trackback/%node` → `trackback_receive` (`trackback.module:326`), access
+  `_trackback_access('receive')` = `can_receive` (defaults 1) + `node_access('view')` — satisfied
+  for anonymous on any published node; no permission required.
+- **Sink:** `trackback.ping.inc:31` `drupal_http_request($_REQUEST['url'])` — outbound fetch to a
+  URL taken **verbatim** from the anonymous request body. `_trackback_valid_url`
+  (`trackback.module:467`) checks only `^(https?)://` + a charset regex — **no host/IP filtering**,
+  so `http://169.254.169.254/…`, `http://127.0.0.1/…`, internal hosts all pass.
+- **Gate:** fires only when `variable_get('trackback_reject_oneway', 0)` is enabled (a non-default
+  anti-spam option that verifies the sender links back).
+- **Exploit (when enabled):** `POST /?q=trackback/123` body `url=http://169.254.169.254/latest/meta-data/`
+  → blind SSRF (response body not returned, only `<error>`), reaching internal services / cloud
+  metadata. The other `drupal_http_request` calls in the file use node-body/editor URLs, not the
+  anonymous ping body. MED (config-conditional).
