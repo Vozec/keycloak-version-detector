@@ -196,3 +196,8 @@ Fix: remove the `["function","fwrite",-1,"path traversal"]` line (php-builtins.m
 - Bench: **RECALL 183/232, FP-on-ok 39/176 — both unchanged**; the win is on real code (socket clients).
 
 Edit: `php/ql/lib/ext/php-builtins.model.yml` (dropped the fwrite path-traversal sink, with a comment).
+
+  Micro-test (isolated DB) confirms #8 end-to-end: `header("Location: ".$_GET['extra'])` (bare prefix, the
+  flickrhood #28 shape) → **flagged**; `header("Location: https://fixed.example.com".$_GET['path'])` →
+  **cleared**; `header("Location: ".$_SERVER['HTTP_HOST'].$_GET['u'])` (spoofable variable prefix) → **still
+  flagged**. The barrier suppresses only the constant scheme+host case, never a bare or variable prefix.

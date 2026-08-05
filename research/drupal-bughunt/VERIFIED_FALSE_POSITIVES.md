@@ -411,3 +411,24 @@ before processing the form, so an anonymous user is denied before the submit han
 bd_video secret-gated unserialize. (This is the only raw request-`unserialize` remaining in the corpus after
 the standalone-script veins; all pre-auth ones — coolfilter #4, banner #5, referral #25, accuweather #26 —
 are already recorded.)
+
+## anon-callback SSRF/auth trio (age_checker / aweber / azure_acs) — all cleared
+- **age_checker** — anon `agegate` (`:233-236` `access=>TRUE`). (a) `$_GET['destination']` open-redirect: the
+  value is rewritten to `$base_url.'/'.$destination` (`:75`) before reaching the JS `window.location`
+  (`age_checker.js:132`) — scheme+host hard-fixed to the site, only a path segment is client-controlled
+  (`destination=http://evil.com` → `https://site/http://evil.com`, same-origin); delivered via
+  `drupal_add_js` (JSON-encoded) so no XSS. (b) `drupal_http_request($url)` (`:542`): host is
+  `variable_get('age_checker_country_code_url','http://geoip.nekudo.com/api/').ip_address()` — admin config
+  host, only the IP path appended. FP (both: host-pinned).
+- **aweber** (D6) — anon `aweberreturnpage` (`:20-25`). The GET-derived `$data` (`:303-306`) flows ONLY into
+  `_aweber_save_lead()` D6-parameterized insert (`%s`/`%d`), never to `drupal_http_request`. The SSRF sink
+  (`:498`) uses hardcoded `http://www.aweber.com/scripts/addlead.pl` and is called from `hook_user`, not the
+  anon callback. FP. **Low note:** anon can insert one junk "lead" row (uid=0) — junk-data spam, no injection.
+- **azure_acs** — anon `acs`/`acserror` (`:36-52` `access=>TRUE`). WS-Fed return handler validates the SWT via
+  `TokenValidator::Validate` (`lib/swt.php:38`) BEFORE any login: enforces expiry, issuer, audience, and
+  `IsHMACValid` (recomputes `hash_hmac('sha256',$swt,base64_decode($signingKey))` vs the token field) — any
+  mismatch throws → `drupal_goto('<front>')`. Login (`user_login_submit`) only runs after Validate succeeds;
+  forging requires the admin signing key. SSRF `$url` (`:264`) is config-derived (namespace+realm), in a
+  block_view path not the anon handler. Open-redirect `previous_page` (`$_GET['q']`, `:16`) is only passed to
+  a `drupal_alter` hook; default `$goto_path` is hardcoded `<front>`. FP (SSO HMAC-gated; hardening note:
+  `==` not `hash_equals` on the HMAC — theoretical timing side-channel only).
