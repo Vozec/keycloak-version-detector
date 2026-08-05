@@ -582,3 +582,25 @@ Batch #1 (annotations/i18n/billwerk/simple_sitemap/blockchain/akismet/symfony_ma
 entity_browser/apex_ai/azure_ad): **1 CRITICAL (#33 apex_ai SQLi)** + 6 high-sev FP. Batch #2 (12 modern
 modules): 0. Batch #3 (12 modules): 0. The taint pass reaches multi-file flows grep can't (found #33 across
 3 files); modern/maintained modules are otherwise clean, consistent with the abandoned-vs-maintained pattern.
+
+## CodeQL discovery batch #4 (12 modules: 1530604/akismet/bittorrent/basket_imex/aggregator/api_insight_lab/acquia_cms_headless/rest_api_authentication/views_bulk_operations/bigcommerce/weather/assistant) — 0 confirmed
+High-sev cleared:
+- **akismet** code-injection `FormController.php:280/573` — `call_user_func($form_state->getValue('akismet')
+  ['context created callback'],…)` but the `akismet` form element declares `#input => FALSE` (FormBuilder
+  never populates it from POST); the value is set programmatically from server config and the callback name is
+  hard-coded (`node_akismet_context_created` via `hook_akismet_form_info`), also `function_exists`/`is_callable`
+  -gated. FP (fixed module-defined callable, no POST-injection).
+- **bittorrent** — tracker announce is anon by design (`bt_tracker.module` hook_menu `access callback=>TRUE`),
+  but `:227` loose `==` is on an **integer `passkey_status` flag** (not a secret; real passkey auth at `:190`
+  is parameterized exact-match SQL), and the `:1061` "XSS" is inside `bencode_response_raw()` which sends
+  `Content-Type: text/plain` (bencoded tracker protocol, not HTML). FP.
+- **views_bulk_operations** — `ActionProcessor:630` `finished_callback` = `[$definition['class'],'finished']`
+  from the action **plugin annotation** (module-registered; unknown id throws); `ViewData:153/156`
+  file-include/callable come from an event subscriber (`[$this->viewData,'getEntityDefault']`, bound method;
+  optional `file` set only by a module subscriber) — neither request-derived. FP.
+- (SSRF akismet `Client.php:338` fixed akismet.com host; weather/basket_imex path-traversal are Drush
+  Commands/AdminPages; 1530604 is a cs_solr client library in a numeric issue-fork; aggregator loose-compare is
+  core-vetted — all FP/non-anon.)
+
+CodeQL discovery running tally: batch #1 = 1 CRITICAL (#33 apex_ai); batches #2, #3, #4 = 0 confirmed. The
+large-modern-module cohort is clean; the taint pass earns its keep on the occasional multi-file flow (#33).
