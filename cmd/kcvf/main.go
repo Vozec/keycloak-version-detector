@@ -48,6 +48,7 @@ func main() {
 	conc := fs.Int("c", 12, "concurrent targets when scanning a list")
 	retries := fs.Int("retry", 3, "attempts per target if the host seems down")
 	timeout := fs.Duration("timeout", 20*time.Second, "per-request timeout")
+	proxy := fs.String("proxy", "", "HTTP(S) or SOCKS5 proxy URL")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Keycloak Version Finder\n\n")
 		fmt.Fprintf(os.Stderr, "Usage:\n  kcvf [flags] <url> [<url> ...]      detect version(s)\n  kcvf -l urls.txt                    scan a list → compact table\n  kcvf enum [-json] <url>             enumerate realms / public info\n  kcvf builddb [source|wellknown|dist|all] [flags]\n\nFlags:\n")
@@ -64,7 +65,11 @@ func main() {
 		os.Exit(2)
 	}
 
-	f, err := kcfinger.New(kcfinger.WithInsecure(*insecure), kcfinger.WithBasePath(*basePath))
+	f, err := kcfinger.New(
+		kcfinger.WithInsecure(*insecure),
+		kcfinger.WithBasePath(*basePath),
+		kcfinger.WithProxy(*proxy),
+	)
 	if err != nil {
 		fatal(err)
 	}
@@ -647,9 +652,16 @@ func runBuildDB(args []string) {
 	conc := fs.Int("c", 8, "concurrency")
 	hours := fs.Int("timeout-hours", 8, "overall timeout in hours (dist of all versions is large)")
 	offline := fs.Bool("grid", false, "use the offline version grid instead of the GitHub tags API")
+	insecure := fs.Bool("k", false, "skip TLS certificate verification")
+	proxy := fs.String("proxy", "", "HTTP(S) or SOCKS5 proxy URL")
 	_ = fs.Parse(args)
 
 	b := kcfinger.NewBuilder()
+	client, err := kcfinger.NewHTTPClient(*proxy, *insecure, 30*time.Second)
+	if err != nil {
+		fatal(err)
+	}
+	b.HTTP = client
 	b.Concurrency = *conc
 	b.Progress = func(s string) { fmt.Fprintln(os.Stderr, "[builddb] "+s) }
 
@@ -768,16 +780,17 @@ func runEnum(args []string) {
 	insecure := fs.Bool("k", false, "skip TLS certificate verification")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	realms := fs.String("realms", "", "comma-separated realm wordlist (overrides the default)")
+	proxy := fs.String("proxy", "", "HTTP(S) or SOCKS5 proxy URL")
 	_ = fs.Parse(args)
 	if fs.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kcvf enum [-k] [-json] [-no-color] [-realms a,b,c] <url>")
+		fmt.Fprintln(os.Stderr, "usage: kcvf enum [-k] [-json] [-no-color] [-proxy URL] [-realms a,b,c] <url>")
 		os.Exit(2)
 	}
 	if *noColor || *asJSON {
 		useColor = false
 	}
 
-	f, err := kcfinger.New(kcfinger.WithInsecure(*insecure))
+	f, err := kcfinger.New(kcfinger.WithInsecure(*insecure), kcfinger.WithProxy(*proxy))
 	if err != nil {
 		fatal(err)
 	}

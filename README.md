@@ -77,6 +77,8 @@ kcvf -v https://sso.example.com/                # + per-asset table, OIDC marker
 kcvf -l urls.txt                                # scan a list -> compact ASCII table
 cat urls.txt | kcvf -k                          # …or pipe the list on stdin
 kcvf --base-path /iam https://sso.example.com   # pin the KC root prefix (reverse-proxy)
+kcvf --proxy http://127.0.0.1:8080 https://sso.example.com
+kcvf --proxy socks5://127.0.0.1:1080 https://sso.example.com
 kcvf --json https://a/ https://b/ | jq          # machine-readable, one object per target
 kcvf enum https://sso.example.com/              # pre-auth realm / issuer / key recon
 ```
@@ -86,6 +88,7 @@ kcvf enum https://sso.example.com/              # pre-auth realm / issuer / key 
 | `-v` | Verbose — per-asset table, all OIDC markers, **and observed realm facts** |
 | `-l <file>` | Read one target URL per line (`#` comments / blanks ignored); `-` / stdin too |
 | `--base-path <p>` | Force the Keycloak root prefix (e.g. `/iam`) instead of auto-deriving |
+| `--proxy <url>` | Route requests through an HTTP(S) or SOCKS5 proxy (`http://`, `https://`, `socks5://`, `socks5h://`) |
 | `--json` | Machine-readable output, one JSON object per target |
 | `-k` | Skip TLS certificate verification |
 | `-c <n>` | Concurrent targets in list mode (default 12) |
@@ -167,7 +170,8 @@ res, err := f.Detect(ctx, "https://sso.example.com/")
 fmt.Println(res.Range, res.Confidence, res.Candidates)
 ```
 
-Options: `WithInsecure(true)`, `WithDB(db)`, `WithHTTPClient(c)`. `Result` is fully
+Options: `WithInsecure(true)`, `WithProxy("socks5://127.0.0.1:1080")`, `WithDB(db)`,
+`WithHTTPClient(c)`. `Result` is fully
 JSON-serializable. Set `f.ProbeConcurrency` to tune per-scan parallelism.
 
 ## 🗂️ Project layout
@@ -206,7 +210,9 @@ make db-rebuild          # full DB (source+discovery+dist) AND re-embed into the
 
 Or with the CLI directly: `kcvf builddb [source|wellknown|dist|all] -o pkg/kcfinger/db.json`.
 Flags: `-c` concurrency, `-min` lowest version to include, `-grid` force the offline grid,
-`-timeout-hours` overall budget, `-i`/`-o` DB paths. Not every patch publishes a
+`-proxy` HTTP(S)/SOCKS5 proxy URL, `-k` skip TLS certificate verification,
+`-timeout-hours` overall budget, `-i`/`-o` DB paths.
+Not every patch publishes a
 `keycloak-themes` artifact to Maven; missing versions are reported and skipped.
 
 ## ⚖️ Legal

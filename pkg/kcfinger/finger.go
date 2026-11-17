@@ -7,7 +7,6 @@ package kcfinger
 import (
 	"context"
 	"crypto/md5"
-	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -37,6 +36,7 @@ type Fingerprinter struct {
 	// instead of auto-deriving it. Useful behind a reverse-proxy prefix when the
 	// welcome/login page doesn't embed an absolute /resources path.
 	BasePath string
+	proxy    string
 }
 
 // Option configures a Fingerprinter.
@@ -50,6 +50,11 @@ func WithInsecure(b bool) Option { return func(f *Fingerprinter) { f.Insecure = 
 
 // WithHTTPClient sets a custom HTTP client.
 func WithHTTPClient(c *http.Client) Option { return func(f *Fingerprinter) { f.HTTP = c } }
+
+// WithProxy routes requests through an HTTP(S) or SOCKS5 proxy. Supported URL
+// schemes are http, https, socks5, and socks5h. Credentials can be embedded in
+// the URL. A custom client supplied with WithHTTPClient takes precedence.
+func WithProxy(rawURL string) Option { return func(f *Fingerprinter) { f.proxy = rawURL } }
 
 // WithBasePath pins the Keycloak root path prefix (e.g. "/iam"), overriding
 // auto-derivation. Empty means auto-derive (default).
@@ -69,11 +74,11 @@ func New(opts ...Option) (*Fingerprinter, error) {
 		o(f)
 	}
 	if f.HTTP == nil {
-		tr := &http.Transport{
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: f.Insecure},
-			MaxIdleConnsPerHost: 32,
+		client, err := NewHTTPClient(f.proxy, f.Insecure, 20*time.Second)
+		if err != nil {
+			return nil, err
 		}
-		f.HTTP = &http.Client{Timeout: 20 * time.Second, Transport: tr}
+		f.HTTP = client
 	}
 	return f, nil
 }
@@ -124,11 +129,11 @@ type Result struct {
 	// custom-theme version or a spoofed/rewritten path, not the real Keycloak
 	// version (e.g. a custom theme versioned "0.23.11"). The token is then
 	// ignored for the verdict and detection falls back to the evidence range.
-	RVSpoofed bool             `json:"resourceVersionSpoofed"`
-	WellKnown *WellKnownResult `json:"wellKnown,omitempty"`
-	Realm        *RealmInfo       `json:"realm,omitempty"` // certain facts (with -enrich)
-	Confidence   string           `json:"confidence"`      // high | medium | low
-	Notes        []string         `json:"notes,omitempty"`
+	RVSpoofed  bool             `json:"resourceVersionSpoofed"`
+	WellKnown  *WellKnownResult `json:"wellKnown,omitempty"`
+	Realm      *RealmInfo       `json:"realm,omitempty"` // certain facts (with -enrich)
+	Confidence string           `json:"confidence"`      // high | medium | low
+	Notes      []string         `json:"notes,omitempty"`
 }
 
 var reResources = regexp.MustCompile(`["'=(]([^"'()\s]*resources/[A-Za-z0-9._\-]+/)`)
